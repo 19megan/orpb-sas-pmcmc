@@ -2,15 +2,16 @@
 # Date created: 11/12/2025
 # %%
 import os
-
-current_path = os.getcwd()
-
-if current_path[-11:] != "tests_mesas":
-    os.chdir("tests_mesas")
-    print("Current working directory changed to 'tests_mesas'.")
 import sys
 
-sys.path.append("../")
+
+# Path to the folder that contains 'mesas.stochastic'
+HIGHEST_LEVEL = r"C:\Users\simon\Desktop\mesas" #ensures repo root is on sys.path
+if HIGHEST_LEVEL not in sys.path:
+    sys.path.insert(0, HIGHEST_LEVEL)
+
+#note: this is a library module, so it will always be imported
+
 import numpy as np
 from dataclasses import dataclass
 import scipy.stats as ss
@@ -43,6 +44,7 @@ class ParamsProcessor:
         self.init_state_params = []
 
     def setup_prior_params(self, mode, flux, sas_name, param_key, sas_func):
+        # e.g. self, mode='to_estimate', flux='Q', sas_name='Q SAS function', param_key='lambda', sas_func=scale_parameters['lambda']
         name = self.distinct_str.join([flux, sas_name, param_key])
 
         # if this parameter is not to be estimated
@@ -69,7 +71,7 @@ class ParamsProcessor:
                         "is_nonnegative": sas_func["is_nonnegative"],
                     }
 
-            else:
+            else: # set up prior with param value
                 if is_C_old:
                     val = sas_func[param_key]
                     self.init_state_params.append(name)
@@ -94,15 +96,16 @@ class ParamsProcessor:
                         val,
                         val / 10.0,
                     ],
-                    "is_nonnegative": True,  # TODO: always non-negative for now
+                    "is_nonnegative": False,# True,  # TODO: always non-negative for now
                 }
 
     def process_distribution_params(
         self, flux, sas_name, sas_func, scale_parameters: None
+        # e.g. self, flux='Q', sas_name='Q SAS function', sas_func='gamma', scale_parameters='lambda':{}, 'S_c':{}
     ):
         dist = sas_func["func"]
 
-        if dist == "kumaraswamy":
+        if dist == "kumaraswamy": # we only estimate scale becuase 'a', 'b', 'loc' are 1,1,0 respectively
             if isinstance(sas_func["args"]["scale"], str):
                 # self.setup_prior_params(
                 #     "not_to_estimate", flux, sas_name, "scale", sas_func
@@ -118,13 +121,13 @@ class ParamsProcessor:
                     "to_estimate", flux, sas_name, "scale", sas_func
                 )
 
-        elif dist == "gamma":
+        elif dist == "gamma": # we only estimate 'a' and 'scale' if not defined as 1 or string, respectively
             if isinstance(sas_func["args"]["scale"], str):
-                if sas_func["args"]["a"] == 1.0:
+                if sas_func["args"]["a"] == 1.0: # exponential distribution when a=1
                     # self.setup_prior_params(
                     #     "not_to_estimate", flux, sas_name, "scale", sas_func
                     # )
-                    if scale_parameters:
+                    if scale_parameters: # ***why do we check this but not for kumaraswamy?*** if scale is_instance then we should always have scale_parameters
                         self.setup_prior_params(
                             "to_estimate",
                             flux,
@@ -143,7 +146,7 @@ class ParamsProcessor:
                     self.setup_prior_params(
                         "not_to_estimate", flux, sas_name, "a", sas_func
                     )
-                else:
+                else: # not exponential
                     # self.setup_prior_params(
                     #     "not_to_estimate", flux, sas_name, "scale", sas_func
                     # )
@@ -167,7 +170,7 @@ class ParamsProcessor:
                         "to_estimate", flux, sas_name, "a", sas_func
                     )
 
-            elif sas_func["args"]["a"] == 1.0:
+            elif sas_func["args"]["a"] == 1.0: # but not scale is_instance string
                 self.setup_prior_params(
                     "not_to_estimate", flux, sas_name, "a", sas_func
                 )
@@ -175,14 +178,14 @@ class ParamsProcessor:
                     "to_estimate", flux, sas_name, "scale", sas_func
                 )
 
-            else:
+            else: # not exponential and not scale is_instance string
                 self.setup_prior_params("to_estimate", flux, sas_name, "a", sas_func)
                 self.setup_prior_params(
                     "to_estimate", flux, sas_name, "scale", sas_func
                 )
 
     def set_obs_uncertainty(self, obs_uncertainty):
-        for key, values in obs_uncertainty.items():
+        for key, values in obs_uncertainty.items(): # e.g. key='sigma observed C in', values={'prior_dis': 'normal', 'prior_params': [0.05, 0.02], 'is_nonnegative': True}
             self.params["to_estimate"][key] = values
 
 
@@ -394,15 +397,15 @@ class ModelInterfaceMesas:
 
         # set _theta_init from sas_specs
         params_processor = ParamsProcessor(self._distinct_str)
-        for flux, flux_sas in self.sas_specs.items():
-            for sas_name, sas_func in flux_sas.items():
+        for flux, flux_sas in self.sas_specs.items(): # e.g. flux='quickflow (mm/hr)', flux_sas={'quickflow (mm/hr) SAS function': {'func': 'kumaraswamy...etc.}}
+            for sas_name, sas_func in flux_sas.items(): # e.g. sas_name='quickflow (mm/hr) SAS function', sas_func={'func': 'kumaraswamy'...etc.}
                 params_processor.process_distribution_params(
                     flux, sas_name, sas_func, self.scale_parameters
                 )
 
         # set _theta_init from solute_parameters
         self.conc_pairs = {}
-        for in_conc, in_conc_params in self.solute_parameters.items():
+        for in_conc, in_conc_params in self.solute_parameters.items(): # e.g. in_conc='precip 18O', in_conc_params={'C_old': 1, 'observations': 'ORPB 18O'}
 
             C_out = in_conc_params["observations"]
 
@@ -601,7 +604,7 @@ class ModelInterfaceMesas:
         valid_input = input_obs[valid_input_ind]
         # valid_input = valid_input[valid_input > 0]
         
-        loc, scale = ss.norm.fit(valid_input)#, floc=0)
+        loc, scale = ss.norm.fit(valid_input)#, floc=0) # I commented out the floc=0 to allow negative mean
 
         # Bulk case: generate input scenarios based on observed input values
         self.R_prime = np.zeros((self.N, self.T))
@@ -617,7 +620,7 @@ class ModelInterfaceMesas:
             U_bar = next((u for u in U_obs if u != 0), 0.0) # first observed values in U_obs
 
             U_obs_p = U_obs.copy()
-            U_obs_p[U_forcing == 0] = 0.0
+            U_obs_p[U_forcing == 0] = 0.0 # no observation when no rainfall
 
             # different input uncertainty for filled and observed
             if is_filled[i]:
@@ -630,7 +633,7 @@ class ModelInterfaceMesas:
                 # R_temp = ss.norm(U_obs, scale=0.0000001).rvs()
                 R_temp = ss.norm.rvs(loc, scale, len(U_obs))
 
-                if isinstance(R_temp, float):
+                if isinstance(R_temp, float): #if single value, convert to array
                     R_temp = np.array([R_temp])
 
                 # TODO: add this to linear case
@@ -662,7 +665,7 @@ class ModelInterfaceMesas:
                 )
                 R_temp = np.nan_to_num(R_temp, nan=0.0)
                 # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
-                self.R_prime[n, start_ind:end_ind] = R_obs.ravel()#R_temp.ravel() #this is my comment, the results are much better with R_obs
+                self.R_prime[n, start_ind:end_ind] = R_obs.ravel() #R_temp.ravel() #this is my comment, the results are much better with R_obs
 
                 # plt.plot(R_temp, label="after normalization")
                 # plt.legend()
@@ -839,7 +842,8 @@ class ModelInterfaceMesas:
         # C_Q = np.zeros((self.N, self._end_ind - self._start_ind, self.num_states))
 
         # Get SAS function according to flux and sas_name
-        for flux in self.model.fluxorder: #I uncommented this because I use different flux names
+        # for flux in self.model.fluxorder: #I uncommented this because I use different flux names
+        for flux in ['discharge (mm/hr)']:
         # for flux in ["Q"]:  # TODO # I commented this
             pQ = self._sas_funcs[flux]
 
