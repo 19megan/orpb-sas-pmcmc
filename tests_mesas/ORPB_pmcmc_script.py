@@ -4,24 +4,29 @@
 import os
 import sys
 
-current_path = os.getcwd()
+script_folder = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_folder) #sys.path is the list of directories python searches for modules/packages
 
-# Make sure local directory is searched BEFORE install packages
-sys.path.insert(0, '.') #ensure the current folder comes first
+REPO_ROOT = r"C:\Users\simon\Desktop\mesas" #ensure mesas and mesas.sas are importable
+SAS_FOLDER = os.path.join(REPO_ROOT, "mesas", "sas") 
+STOCHASTIC_FOLDER = os.path.join(REPO_ROOT, "mesas.stochastic") #ensure mesas.stochastic and submodules are importable
+os.environ['PATH'] = SAS_FOLDER + os.pathsep + os.environ.get('PATH', '') #ensures windows can find the dlls in sas for compiled .pyd extentions
+sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, STOCHASTIC_FOLDER)
 
-if current_path[-11:] != "tests_mesas":
-    os.chdir("tests_mesas")
-    print("Current working directory changed to 'tests_mesas'.")
+# Clear previously imported modules to ensure fresh import of edited files
+modules_to_clear = [
+    "ORPB_mesas_interface",
+    "mesas.sas.model",
+    "mesas.sas.utils_chain",
+    "mesas.sas.ssm_model",
+    "mesas.sas.specs",
+    "utils"
+]
+for mod in modules_to_clear:
+    if mod in sys.modules:
+        del sys.modules[mod]
 
-
-# Force a fresh import
-# Remove ANY cached copies
-mods = [m for m in sys.modules if "ORPB_mesas_interface" in m or "tests_mesas" in m]
-for m in mods:
-    del sys.modules[m]
-    print("Deleted cached module:", m)
-
-# sys.path.append("../") # this makes tests_mesas in the parent directory of the import path which makes ModelInterfaceMesas not import as my edited file/
 
 # from functions.get_dataset import get_different_input_scenarios
 import pandas as pd
@@ -44,7 +49,7 @@ import seaborn as sns
 # SET FOLDERS
 # ================================================================
 data_root = "/Users/simon/OneDrive/Documents/JHU/SAS"
-result_root = "/Users/simon/OneDrive/Documents/JHU/SAS/ORPB_results"
+result_root = "/Users/simon/Desktop/ORPB_results"
 
 if not os.path.exists(result_root):
     os.makedirs(result_root)
@@ -74,10 +79,10 @@ df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
 
 df['is_obs_output'] = df['ORPB 18O'].notna()
 
-case_name = 'storage_q_ug_et_u'
+case_name = 'storage_q_g_et_u'
 
-num_input_scenarios = 15 #N
-num_parameter_samples = 15 #D
+num_input_scenarios = 5# 15 #N
+num_parameter_samples = 5#15 #D
 len_parameter_MCMC = 5 #L
 
 #%%
@@ -89,7 +94,7 @@ config = {
     'dt': 24, # in hours
     'observed_made_each_step': output_obs,
     'influx': ['influx (mm/hr)'],
-    'outflux': ['quickflow (mm/hr)', 'baseflow 1 (mm/hr)', 'ET (mm/hr)'],
+    'outflux': ['discharge (mm/hr)', 'ET (mm/hr)'], #['quickflow (mm/hr)', 'baseflow 1 (mm/hr)', 'ET (mm/hr)'],
     'use_MAP_AS_weight': True,
     'use_MAP_ref_traj': True,
     'use_MAP_MCMC': True,
@@ -105,6 +110,14 @@ if case_name == 'storage_q_ug_et_u':
         num_input_scenarios=num_input_scenarios,
         config=config,
         theta_init=theta_storage_q_ug_et_u
+    )
+elif case_name == 'storage_q_g_et_u':
+    model_interface = model_interface_class(
+        df=df,
+        customized_model=SAS_Model,
+        num_input_scenarios=num_input_scenarios,
+        config=config,
+        theta_init=theta_storage_q_g_et_u
     )
 else:
     raise ValueError("Case name not found.")
@@ -145,7 +158,7 @@ chain.run_particle_filter_SIR()
 
 plt.figure()
 plt.plot(model_interface.df["precip 18O"], "*")
-plt.plot(model_interface.df.index, chain.state.R[:, :, 0].T, ".", markersize=0.7)
+plt.plot(model_interface.df.index, chain.state.R[:, :, 0].T, ".", markersize=0.7) #chain.state.R[:,:,0] where 0 is quickflow (mm/hr) from outflux
 plt.xticks(rotation=30)
 plt.ylabel("Concentration")
 plt.tight_layout()
