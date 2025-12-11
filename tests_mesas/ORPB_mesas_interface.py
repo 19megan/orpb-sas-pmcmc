@@ -94,7 +94,7 @@ class ParamsProcessor:
                     "prior_dis": "normal",
                     "prior_params": [
                         val,
-                        val / 10.0,
+                        abs(val) / 10.0, # I added abs() here to make sure the scale is always positive when my value can be negative
                     ],
                     "is_nonnegative": False,# True,  # TODO: always non-negative for now
                 }
@@ -665,7 +665,7 @@ class ModelInterfaceMesas:
                 )
                 R_temp = np.nan_to_num(R_temp, nan=0.0)
                 # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
-                self.R_prime[n, start_ind:end_ind] = R_obs.ravel() #R_temp.ravel() #this is my comment, the results are much better with R_obs
+                self.R_prime[n, start_ind:end_ind] = R_temp.ravel() #this is my comment, the results are much better with R_obs
 
                 # plt.plot(R_temp, label="after normalization")
                 # plt.legend()
