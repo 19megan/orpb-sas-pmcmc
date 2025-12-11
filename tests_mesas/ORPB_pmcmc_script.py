@@ -81,7 +81,7 @@ df['is_obs_output'] = df['ORPB 18O'].notna()
 
 case_name = 'storage_q_g_et_u'
 
-num_input_scenarios = 5# 15 #N
+num_input_scenarios = 10# 15 #N
 num_parameter_samples = 5#15 #D
 len_parameter_MCMC = 5 #L
 
@@ -91,7 +91,7 @@ len_parameter_MCMC = 5 #L
 # initialize model settings
 output_obs = df['ORPB 18O'].notna().to_list()
 config = {
-    'dt': 24, # in hours
+    'dt': 1, # in hours
     'observed_made_each_step': output_obs,
     'influx': ['influx (mm/hr)'],
     'outflux': ['discharge (mm/hr)', 'ET (mm/hr)'], #['quickflow (mm/hr)', 'baseflow 1 (mm/hr)', 'ET (mm/hr)'],
@@ -146,6 +146,7 @@ handles, labels = plt.gca().get_legend_handles_labels()
 plt.legend(handles[-2:], labels[-2:], loc="upper right", fontsize=12, ncol=2)
 plt.ylabel("Concentration")
 plt.tight_layout()
+plt.show() # for command line pop-up window
 plt.savefig(f"{result_root}/input_scenarios_{case_name}.pdf")
 
 # %%
@@ -163,6 +164,7 @@ plt.xticks(rotation=30)
 plt.ylabel("Concentration")
 plt.tight_layout()
 plt.title("Input concentration scenarios from SIR")
+plt.show()
 
 # %%
 # for i in range(25):
@@ -182,6 +184,7 @@ plt.xticks(rotation=30)
 plt.ylabel("Concentration")
 plt.tight_layout()
 plt.title("Output concentration scenarios from SIR")
+plt.show()
 print("done SIR check")
 
 
@@ -205,6 +208,7 @@ plt.xticks(rotation=30)
 plt.ylabel("Concentration")
 plt.tight_layout()
 plt.title("Output concentration scenarios from AS")
+plt.show()
 print("done AS check")
 
 # %%
@@ -261,6 +265,7 @@ for i in range(len_parameter_MCMC + 1):
 #     plt.plot(model_interface.df.index[st:et], output_scenarios[i, st:et].T,   label=f"output {i}", lw=0.5)
 plt.legend(frameon=False)
 # np.save(f"output.npy", output_scenarios)
+plt.show()
 
 # %%
 # # save data as csv files
@@ -294,3 +299,4 @@ for i in range(len_parameter_MCMC + 1):
     # plt.xlim([time[0], time[-1]])
 #     plt.plot(model_interface.df.index[st:et], output_scenarios[i, st:et].T,   label=f"output {i}", lw=0.5)
 plt.legend(frameon=False)
+plt.show()
