@@ -55,8 +55,7 @@ sas_specs_storage_q_g_et_u = {
 
 }
 
-#C_old = -7.6 but I'm getting errors for a negative scale in param_dist so I'll change it
-solute_parameters = {'precip 18O': {'C_old': 1, 'observations': 'ORPB 18O'}
+solute_parameters = {'precip 18O': {'C_old': -7.6, 'observations': 'ORPB 18O'}
                      }
 
 options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True}#, 'max_age': 365} #set max age to reduce memory errors
