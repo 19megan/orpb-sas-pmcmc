@@ -48,7 +48,7 @@ import seaborn as sns
 #%%
 # SET FOLDERS
 # ================================================================
-data_root = "/Users/simon/OneDrive/Documents/JHU/SAS"
+data_root = "/Users/simon/Desktop/SAS"
 result_root = "/Users/simon/Desktop/ORPB_results"
 
 if not os.path.exists(result_root):
@@ -66,6 +66,7 @@ data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum
 # separate Q into quickflow and baseflow 1
 data_df['quickflow (mm/hr)'] = data_df['discharge (mm/hr)'] - data_df['baseflow 1 (mm/hr)']
 data_df['bf1_weight'] = data_df['baseflow 1 (mm/hr)'] / data_df['discharge (mm/hr)']
+data_df['qf_weight'] = data_df['quickflow (mm/hr)'] / data_df['discharge (mm/hr)']
 isbaseflow = data_df.loc[(data_df['quickflow (mm/hr)']<0.001) & issample].index
 isquickflow = data_df.loc[(data_df['quickflow (mm/hr)']>=0.001) & issample].index
 
@@ -79,11 +80,11 @@ df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
 
 df['is_obs_output'] = df['ORPB 18O'].notna()
 
-case_name = 'storage_q_g_et_u'
+case_name = 'storage_q_gg_et_u'#********************
 
-num_input_scenarios = 10# 15 #N
-num_parameter_samples = 5#15 #D
-len_parameter_MCMC = 5 #L
+num_input_scenarios = 3# 15 #N
+num_parameter_samples = 3#15 #D
+len_parameter_MCMC = 2#5 #L
 
 #%%
 # RUN MODEL 
@@ -103,13 +104,21 @@ config = {
 
 model_interface_class = ModelInterfaceMesas
 
-if case_name == 'storage_q_ug_et_u':
+if case_name == 'storage_q_gg_et_u':
     model_interface = model_interface_class(
         df=df,
         customized_model=SAS_Model,
         num_input_scenarios=num_input_scenarios,
         config=config,
-        theta_init=theta_storage_q_ug_et_u
+        theta_init=theta_storage_q_gg_et_u
+    )
+elif case_name == 'storage_q_u_et_u':
+    model_interface = model_interface_class(
+        df=df,
+        customized_model=SAS_Model,
+        num_input_scenarios=num_input_scenarios,
+        config=config,
+        theta_init=theta_storage_q_u_et_u
     )
 elif case_name == 'storage_q_g_et_u':
     model_interface = model_interface_class(
@@ -122,96 +131,96 @@ elif case_name == 'storage_q_g_et_u':
 else:
     raise ValueError("Case name not found.")
 
-#%%
-# CHECK INPUT SCENARIOS GENERATION
-#  ================================================================
+# #%%
+# # CHECK INPUT SCENARIOS GENERATION
+# #  ================================================================
 
-# check input scenarios generation
-model_interface._bulk_input_preprocess()
+# # check input scenarios generation
+# model_interface._bulk_input_preprocess()
 
-plt.figure(figsize=(12, 4))
-r = model_interface.R_prime
-for i in range(num_input_scenarios):
-    plt.scatter(
-        df.index, r[i], marker=".", s=10, c="gray", alpha=0.5, label=f"Simulated inputs"
-    )
-obs = model_interface.df[model_interface.in_sol].to_numpy()
-plt.plot(df.index, obs, ".", markersize=5, label="Observed inputs")
-# plt.yscale("log")
-# plt.xticks(time[1::90], rotation=30) 
-# ax = plt.gca()
-# ax.set_xticks(ax.get_xticks()[1::90])
-plt.xlim(df.index[0], df.index[-1])
-handles, labels = plt.gca().get_legend_handles_labels()
-plt.legend(handles[-2:], labels[-2:], loc="upper right", fontsize=12, ncol=2)
-plt.ylabel("Concentration")
-plt.tight_layout()
-plt.show() # for command line pop-up window
-plt.savefig(f"{result_root}/input_scenarios_{case_name}.pdf")
+# plt.figure(figsize=(12, 4))
+# r = model_interface.R_prime
+# for i in range(num_input_scenarios):
+#     plt.scatter(
+#         df.index, r[i], marker=".", s=10, c="gray", alpha=0.5, label=f"Simulated inputs"
+#     )
+# obs = model_interface.df[model_interface.in_sol].to_numpy()
+# plt.plot(df.index, obs, ".", markersize=5, label="Observed inputs")
+# # plt.yscale("log")
+# # plt.xticks(time[1::90], rotation=30) 
+# # ax = plt.gca()
+# # ax.set_xticks(ax.get_xticks()[1::90])
+# plt.xlim(df.index[0], df.index[-1])
+# handles, labels = plt.gca().get_legend_handles_labels()
+# plt.legend(handles[-2:], labels[-2:], loc="upper right", fontsize=12, ncol=2)
+# plt.ylabel("Concentration")
+# plt.tight_layout()
+# plt.show() # for command line pop-up window
+# plt.savefig(f"{result_root}/input_scenarios_{case_name}.pdf")
 
-# %%
-# RUN pMCMC CHAIN 
-# ================================================================
+# # %%
+# # RUN pMCMC CHAIN 
+# # ================================================================
 
-chain = Chain(model_interface=model_interface)
-chain.run_particle_filter_SIR()
-# %% Plot check
+# chain = Chain(model_interface=model_interface)
+# chain.run_particle_filter_SIR()
+# # %% Plot check
 
-plt.figure()
-plt.plot(model_interface.df["precip 18O"], "*")
-plt.plot(model_interface.df.index, chain.state.R[:, :, 0].T, ".", markersize=0.7) #chain.state.R[:,:,0] where 0 is quickflow (mm/hr) from outflux
-plt.xticks(rotation=30)
-plt.ylabel("Concentration")
-plt.tight_layout()
-plt.title("Input concentration scenarios from SIR")
-plt.show()
+# plt.figure()
+# plt.plot(model_interface.df["precip 18O"], "*")
+# plt.plot(model_interface.df.index, chain.state.R[:, :, 0].T, ".", markersize=0.7) #chain.state.R[:,:,0] where 0 is quickflow (mm/hr) from outflux
+# plt.xticks(rotation=30)
+# plt.ylabel("Concentration")
+# plt.tight_layout()
+# plt.title("Input concentration scenarios from SIR")
+# plt.show()
 
-# %%
-# for i in range(25):
-#     plt.figure()
-#     plt.plot(model_interface.df['C out'], "*")
-#     plt.plot(model_interface.df.index, chain.state.Y[i,:,0].T)#, ".", markersize=0.7)
-plt.figure()
-plt.plot(model_interface.df["ORPB 18O"], "*")
-plt.plot(model_interface.df.index, chain.state.Y[:, :, 0].T, ".", markersize=0.7)
-plt.plot(
-    model_interface.df.index,
-    chain.state.Y[np.argmax(chain.state.W), :, 0].T,
-    ".",
-    markersize=10,
-)
-plt.xticks(rotation=30)
-plt.ylabel("Concentration")
-plt.tight_layout()
-plt.title("Output concentration scenarios from SIR")
-plt.show()
-print("done SIR check")
+# # %%
+# # for i in range(25):
+# #     plt.figure()
+# #     plt.plot(model_interface.df['C out'], "*")
+# #     plt.plot(model_interface.df.index, chain.state.Y[i,:,0].T)#, ".", markersize=0.7)
+# plt.figure()
+# plt.plot(model_interface.df["ORPB 18O"], "*")
+# plt.plot(model_interface.df.index, chain.state.Y[:, :, 0].T, ".", markersize=0.7)
+# plt.plot(
+#     model_interface.df.index,
+#     chain.state.Y[np.argmax(chain.state.W), :, 0].T,
+#     ".",
+#     markersize=10,
+# )
+# plt.xticks(rotation=30)
+# plt.ylabel("Concentration")
+# plt.tight_layout()
+# plt.title("Output concentration scenarios from SIR")
+# plt.show()
+# print("done SIR check")
 
 
-# %%
+# # %%
 
-chain.run_particle_filter_AS()
+# chain.run_particle_filter_AS()
 
-plt.figure()
-sns.boxplot(chain.state.R[:, :, 0])
-plt.plot(model_interface.df["precip 18O"].values, "*")
-plt.xticks(rotation=30)
-plt.ylabel("Concentration")
-plt.tight_layout()
-plt.title("Input concentration scenarios from AS")
-r = chain.state.R[:, :, 0].T
-q = chain.state.Y[:, :, 0].T
-plt.figure()
-plt.plot(model_interface.df["ORPB 18O"], "*")
-plt.plot(model_interface.df.index, chain.state.Y[:, :, 0].T, ".", markersize=0.7)
-plt.xticks(rotation=30)
-plt.ylabel("Concentration")
-plt.tight_layout()
-plt.title("Output concentration scenarios from AS")
-plt.show()
-print("done AS check")
+# plt.figure()
+# sns.boxplot(chain.state.R[:, :, 0])
+# plt.plot(model_interface.df["precip 18O"].values, "*")
+# plt.xticks(rotation=30)
+# plt.ylabel("Concentration")
+# plt.tight_layout()
+# plt.title("Input concentration scenarios from AS")
+# r = chain.state.R[:, :, 0].T
+# q = chain.state.Y[:, :, 0].T
+# plt.figure()
+# plt.plot(model_interface.df["ORPB 18O"], "*")
+# plt.plot(model_interface.df.index, chain.state.Y[:, :, 0].T, ".", markersize=0.7)
+# plt.xticks(rotation=30)
+# plt.ylabel("Concentration")
+# plt.tight_layout()
+# plt.title("Output concentration scenarios from AS")
+# plt.show()
+# print("done AS check")
 
-# %%
+# # %%
 
 # run actual particle Gibbs
 model = SSModel(
@@ -240,15 +249,17 @@ df = model_interface.df
 
 #%% plot each MCMC iteration output against observed
 
-plt.figure()
 st, et = model_interface.observed_ind[0], model_interface.observed_ind[-1]
-# plt.plot(model_interface.df["Q"], "grey")
-
 time = model_interface.df.index
-# plt.plot(time[st:et], output_scenarios[:, st:et].T,'.', alpha = 0.1, color="grey",lw=0.5, label="predicted")
-# make a step plot
-# plt.step(time[st:et], model_interface.df["C out"].backfill().iloc[st:et], label= "observed")
-# plt.plot(time[st:et],model_interface.df["C out"].iloc[st:et], "*", label= "observed")
+
+# plt.figure(figsize=(12,4))
+# plt.plot(model_interface.df["discharge (mm/hr)"], "grey")
+
+# plt.plot(time[st:et], output_scenarios[-1:, st:et].T,'.', alpha = 0.1, color="grey",lw=0.5, label="predicted")
+# # make a step plot
+# plt.step(time[st:et], model_interface.df["ORPB 18O"].backfill().iloc[st:et], label= "observed")
+# plt.plot(time[st:et],model_interface.df["ORPB 18O"].iloc[st:et], "*", label= "observed")
+
 for i in range(len_parameter_MCMC + 1):
     plt.figure(figsize=(12, 4))
 
@@ -269,19 +280,18 @@ plt.show()
 
 # %%
 # # save data as csv files
-theta_df.to_csv(f"{result_root}/theta_{case_name}.csv")
+theta_df.to_csv(f"{result_root}/theta_{case_name}_1M.csv")
 
-np.savetxt(f"{result_root}/input_scenarios_{case_name}.csv", input_scenarios, delimiter=",")
-np.savetxt(f"{result_root}/output_scenarios_{case_name}.csv", output_scenarios, delimiter=",")
-
+np.savetxt(f"{result_root}/input_scenarios_{case_name}_1M.csv", input_scenarios, delimiter=",")
+np.savetxt(f"{result_root}/output_scenarios_{case_name}_1M.csv", output_scenarios, delimiter=",")
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
 
-input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}.csv", delimiter=",", header=None)
-output_scenarios = pd.read_table(f"{result_root}/output_scenarios_{case_name}.csv", delimiter=",", header=None)
-time = model_interface.df.index
-st, et = model_interface.observed_ind[0], model_interface.observed_ind[-1]
+input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_1yr.csv", delimiter=",", header=None)
+output_scenarios = pd.read_table(f"{result_root}/output_scenarios_{case_name}_1yr.csv", delimiter=",", header=None)
+time = df.index
+st, et = df.index.get_loc(df['ORPB 18O'].first_valid_index()), df.index.get_loc(df['ORPB 18O'].last_valid_index())
 
 plt.figure()
 for i in range(len_parameter_MCMC + 1):
@@ -289,14 +299,33 @@ for i in range(len_parameter_MCMC + 1):
 
     plt.step(
         time[st:et],
-        model_interface.df["ORPB 18O"].backfill().iloc[st:et],
+        df["ORPB 18O"].backfill().iloc[st:et],
         label="observed",
     )
     plt.plot(
-        time[st:et], output_scenarios[i, st:et].T, color="orange", label="predicted"
+        time[st:et], output_scenarios.iloc[i, st:et].T, color="orange", label="predicted"
     )
     plt.title(f'pMCMC iteration {i}')
     # plt.xlim([time[0], time[-1]])
 #     plt.plot(model_interface.df.index[st:et], output_scenarios[i, st:et].T,   label=f"output {i}", lw=0.5)
 plt.legend(frameon=False)
 plt.show()
+# %%
+
+# Plot residuals between observed and predicted at each MCMC iteration
+#======================================================================
+plt.figure()
+for i in range(len_parameter_MCMC + 1):
+    plt.figure(figsize=(12, 4))
+
+    plt.step(
+        time[st:et],
+        (df["ORPB 18O"].backfill().iloc[st:et]).to_numpy() - (output_scenarios.iloc[i, st:et].T).to_numpy(),
+        label="residuals",
+    )
+    plt.axhline(0, color='black', linestyle='--')
+    plt.title(f'pMCMC iteration {i} residuals')
+    # print(f'Mean residuals at iteration {i}: {np.mean((df["ORPB 18O"].backfill().iloc[st:et]).to_numpy() - (output_scenarios.iloc[i, st:et].T).to_numpy())}')
+plt.legend(frameon=False)
+plt.show()
+# %%
