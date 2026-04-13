@@ -70,6 +70,12 @@ class SSModel:
         self.theta_record = np.zeros(
             (self.L+1, self._num_theta_to_estimate)
             )
+        self.theta_std = np.zeros(
+            (self.L+1, self._num_theta_to_estimate)
+            )
+        self.theta_modeled = np.zeros(
+            (self.L+1, self._num_theta_to_estimate)
+        )
         
         # TODO: assume one input for now
         self.input_record = np.zeros(
@@ -135,6 +141,7 @@ class SSModel:
 
             # find optimal trajectory of each chain
             self.theta_record[0,p] = theta_dist_mean
+            self.theta_std[0,p] = theta_dist_std
 
 
         if self.is_MAP_MCMC:
@@ -144,6 +151,7 @@ class SSModel:
             ind_best_param = _inverse_pmf(theta_new[:,-1], W_theta, num=1)[0]
 
         best_model = chains[ind_best_param]
+        self.theta_modeled[0,:] = theta_new[ind_best_param, :]
         B = BB[ind_best_param,:] 
         self.input_record[0,:] = best_model._get_R_traj(best_model.state.R, B)
         self.state_record[0,:] = best_model._get_X_traj(best_model.state.X, B)
@@ -159,7 +167,7 @@ class SSModel:
 
 
         # for each MCMC iteration
-        for l in tqdm(range(self.L)):
+        for l in tqdm(range(self.L)): # progress bar for long simulations
             # for each theta
             for p, key in enumerate(self._theta_to_estimate):
                 theta_new = self._update_theta_at_p(
@@ -179,10 +187,9 @@ class SSModel:
                     BB[d,:] = B
                     state_W = chains[d].model_interface.transition_model_probability(traj_X)
                     WW[d] = state_W + np.log(model_W.max())
-                
+                #record values over D chains and evolution of theta distributions
                 W_theta = np.exp((WW - WW.max())/WW.max())
                 W_theta = W_theta / W_theta.sum()
-
                 theta_dist_mean = (theta_new[:,p]*W_theta).sum()
                 theta_dist_std = np.sqrt(sum((theta_new[:,p] - theta_dist_mean)**2 * W_theta)/(self.D-1.))
                 save_std[p] = theta_dist_std
@@ -190,14 +197,15 @@ class SSModel:
 
                 # find optimal trajectory of each chain
                 self.theta_record[l+1,p] = theta_dist_mean 
+                self.theta_std[l+1,p] = theta_dist_std
 
             if self.is_MAP_MCMC:
-                ind_best_param = np.argmax(W_theta)
+                ind_best_param = np.argmax(W_theta) # max likelihood of p(y|Y)
             else:
                 ind_best_param = _inverse_pmf(theta_new[:,p],W_theta, num=1)[0]
 
             best_model = chains[ind_best_param]  
-
+            self.theta_modeled[l+1,:] = theta_new[ind_best_param, :]
             B = BB[ind_best_param,:]
             self.input_record[l+1,:] = best_model._get_R_traj(best_model.state.R, B)
             self.state_record[l+1,:] = best_model._get_X_traj(best_model.state.X, B)
