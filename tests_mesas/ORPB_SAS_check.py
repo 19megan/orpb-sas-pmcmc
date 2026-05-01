@@ -14,7 +14,7 @@ from ORPB_cases import *
 from call_SAS import run_SAS
 
 data_df = pd.read_csv(f'/Users/simon/Desktop/SAS/ORPB_isotope_data.csv', index_col=0, parse_dates=[0])
-data_df = data_df.loc[pd.Timestamp('2014-08-01'): pd.Timestamp('2014-08-31')] #subset to Putnam's data range 2014-08-01 - 2016-08-31
+data_df = data_df.loc[pd.Timestamp('2014-01-01'): pd.Timestamp('2014-03-30')] #subset to Putnam's data range 2014-08-01 - 2016-08-31
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
 data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum(axis=1)
 data_df.loc[data_df['influx (mm/hr)']==0, 'precip 18O'] = 0.0
@@ -29,24 +29,38 @@ mean = data_df['precip 18O'].mean()
 df= data_df.copy() #make a copy of the data_df
 df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
 
-case_name = 'storage_q_gg_et_u'
-
 # make sure pMCMC and this script use the same observed_ind
 obs_made = df['ORPB 18O'].notna().to_list()
 observed_ind = np.arange(len(df))[obs_made]
 
-#%% 
-# -------------------Set parameters ----------------------------
-checkparams = {}
-checkparams['C_old'] = -7.70623965251686 # (per mil)
-checkparams['scale'] =46.33924896891153 # ET scale
-checkparams['qf_a'] = 0.5406241295147112 # qf shape parameter
-checkparams['qf_scale'] = 0.5021168023432488 # qf scale parameter
-checkparams['a'] =  1.2251846594723816 #1.26399
-checkparams['S_c'] = -129.2516881115114 #min(df['storage (mm)'])-50 # this is solid, should be less than dynamic storage
-checkparams['lambda'] =0.28866859021656743 #0.3563 #1.1017 # 10/(df['storage (mm)'].median()-S_c) #median of storage is s_ref
-scale = 1547.119
-df['S_scale'] = checkparams['lambda']*(df['storage (mm)']-checkparams['S_c'])
+mi = 1 # mesas iteration to compare to
+# df['precip 18O'] = input_scenarios[mi, :] #compare to input scenarios
+
+case_name = 'storage_q_ug_et_u'#********************************change testing
+
+if case_name == 'storage_q_gg_et_u':
+
+    # -------------------Set parameters ----------------------------
+    checkparams = {}
+    names = ['qf_a', 'qf_scale', 'lambda', 'S_c', 'bf_a', 'et_scale']
+    values = theta_modeled_df.iloc[mi]
+    for i in range(len(names)):
+        checkparams[names[i]] = values.iloc[i]
+    checkparams['C_old'] = state_record[mi, model_interface.observed_ind[0]] #Cold for iteration 1
+
+    df['S_scale'] = checkparams['lambda']*(df['storage (mm)']-checkparams['S_c'])
+
+elif case_name == 'storage_q_ug_et_u':
+
+    # -------------------Set parameters ----------------------------
+    checkparams = {}
+    names = ['qf_scale', 'lambda', 'S_c', 'bf_a', 'et_scale']
+    values = theta_modeled_df.iloc[mi]
+    for i in range(len(names)):
+        checkparams[names[i]] = values.iloc[i]
+    checkparams['C_old'] = state_record[mi, model_interface.observed_ind[0]] #Cold for iteration 1
+
+    df['S_scale'] = checkparams['lambda']*(df['storage (mm)']-checkparams['S_c'])
 #%%
 #-------------------Decide what lamda should be -----------------------
 # scale = df['storage (mm)']
@@ -109,5 +123,5 @@ plt.plot(model.data_df.index[st:et], model.data_df['precip 18O --> discharge (mm
 # plt.axvspan(pd.Timestamp('2018-10-01'), pd.Timestamp('2019-09-30'), color='lightgrey', alpha=0.5)
 plt.legend()
 plt.title('Isotope outflow at ORPB')
-
+#Ask CLAUDE why it appears cliped at cold value?*************
 # %%
