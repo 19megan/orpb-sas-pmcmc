@@ -9,28 +9,44 @@ import matplotlib.pyplot as plt
 
 def run_SAS(df, params):
     print(params)
-    C_old = params['C_old']
-    et_scale = params['scale']
-    qf_a = params['qf_a']
-    qf_scale = params['qf_scale']
-    a = params['a']
-    S_c=params['S_c']
-    lamda=params['lambda']
-    df['S_scale'] = lamda*(df['storage (mm)']-S_c)
-    # sas_specs_storage_q_g_et_u['discharge (mm/hr)']['discharge (mm/hr) SAS function']['args']['a'] = a
-    # sas_specs_storage_q_g_et_u['discharge (mm/hr)']['discharge (mm/hr) SAS function']['args']['scale'] = 'S_scale'
-    # sas_specs_storage_q_g_et_u['ET (mm/hr)']['ET (mm/hr) SAS function']['args']['scale'] = et_scale
-    # solute_parameters['precip 18O']['C_old'] = C_old
+    
+    if 'qf_a' in params.keys():
+        C_old = params['C_old']
+        et_scale = params['et_scale']
+        qf_a = params['qf_a']
+        qf_scale = params['qf_scale']
+        bf_a = params['bf_a']
+        S_c=params['S_c']
+        lamda=params['lambda']
+        df['S_scale'] = lamda*(df['storage (mm)']-S_c)
+        # sas_specs_storage_q_g_et_u['discharge (mm/hr)']['discharge (mm/hr) SAS function']['args']['a'] = a
+        # sas_specs_storage_q_g_et_u['discharge (mm/hr)']['discharge (mm/hr) SAS function']['args']['scale'] = 'S_scale'
+        # sas_specs_storage_q_g_et_u['ET (mm/hr)']['ET (mm/hr) SAS function']['args']['scale'] = et_scale
+        # solute_parameters['precip 18O']['C_old'] = C_old
 
-    sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['qf_weight']['args']['a'] = qf_a
-    sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['qf_weight']['args']['scale'] = qf_scale
-    sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['bf1_weight']['args']['a'] = a
-    sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['bf1_weight']['args']['scale'] = 'S_scale'
-    sas_specs_storage_q_gg_et_u['ET (mm/hr)']['ET (mm/hr) SAS function']['args']['scale'] = et_scale
-    solute_parameters['precip 18O']['C_old'] = C_old
+        sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['qf_weight']['args']['a'] = qf_a
+        sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['qf_weight']['args']['scale'] = qf_scale
+        sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['bf1_weight']['args']['a'] = bf_a
+        sas_specs_storage_q_gg_et_u['discharge (mm/hr)']['bf1_weight']['args']['scale'] = 'S_scale'
+        sas_specs_storage_q_gg_et_u['ET (mm/hr)']['ET (mm/hr) SAS function']['args']['scale'] = et_scale
+        solute_parameters['precip 18O']['C_old'] = C_old
+        model = Model(df, config={'sas_specs': deepcopy(sas_specs_storage_q_gg_et_u), 'solute_parameters': deepcopy(solute_parameters), 'options': deepcopy(options)})
+    else:
+        C_old = params['C_old']
+        et_scale = params['et_scale']
+        qf_scale = params['qf_scale']
+        bf_a = params['bf_a']
+        S_c=params['S_c']
+        lamda=params['lambda']
+        df['S_scale'] = lamda*(df['storage (mm)']-S_c)
 
-
-    model = Model(df, config={'sas_specs': deepcopy(sas_specs_storage_q_gg_et_u), 'solute_parameters': deepcopy(solute_parameters), 'options': deepcopy(options)})
+        sas_specs_storage_q_ug_et_u['discharge (mm/hr)']['qf_weight']['args']['scale'] = qf_scale
+        sas_specs_storage_q_ug_et_u['discharge (mm/hr)']['bf1_weight']['args']['a'] = bf_a
+        sas_specs_storage_q_ug_et_u['discharge (mm/hr)']['bf1_weight']['args']['scale'] = 'S_scale'
+        sas_specs_storage_q_ug_et_u['ET (mm/hr)']['ET (mm/hr) SAS function']['args']['scale'] = et_scale
+        solute_parameters['precip 18O']['C_old'] = C_old
+        model = Model(df, config={'sas_specs': deepcopy(sas_specs_storage_q_ug_et_u), 'solute_parameters': deepcopy(solute_parameters), 'options': deepcopy(options)})
+    
     model.run()
 
     # plt.figure(figsize=[12,4])
