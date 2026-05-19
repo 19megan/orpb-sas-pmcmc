@@ -665,7 +665,7 @@ class ModelInterfaceMesas:
                 )
                 R_temp = np.nan_to_num(R_temp, nan=0.0)
                 # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
-                self.R_prime[n, start_ind:end_ind] = R_temp.ravel() #this is my comment, the results are much better with R_obs
+                self.R_prime[n, start_ind:end_ind] = R_temp.ravel() 
 
                 # plt.plot(R_temp, label="after normalization")
                 # plt.legend()
@@ -705,7 +705,8 @@ class ModelInterfaceMesas:
             self.df["S_scale"] = scale_param[flux]["lambda"] * (
                 delta_S - scale_param[flux]["S_c"]
             )
-            self.sas_specs[flux][f"{flux} SAS function"]["args"]["scale"] = "S_scale"
+            # self.sas_specs[flux][f"{flux} SAS function"]["args"]["scale"] = "S_scale"
+            self.sas_specs[flux]["bf1_weight"]["args"]["scale"] = "S_scale"
 
     def _init_sas_model(self) -> None:
         # create a new variable to storage sas model
@@ -775,6 +776,9 @@ class ModelInterfaceMesas:
         # Get solute factors for each solute
         temp_model = self.model.copy_without_results()
         temp_model._data_df = temp_df
+        # Fix: override solute_parameters in the copied model
+        for sol_in in self.conc_pairs.keys():
+            temp_model.solute_parameters[sol_in]['C_old'] = 1.0
         temp_model.run()
 
         for i in range(len(self._init_state_params)):
@@ -874,7 +878,9 @@ class ModelInterfaceMesas:
                         # the maximum age is t
                         C_Q[n, tt, i] = 0
 
-                        for T in range(self._end_ind + 1):
+                        max_age = pQ.shape[0]
+                        # for T in range(self._end_ind): # + 1):
+                        for T in range(min(self._end_ind, max_age)):
                             # the entry time is ti
                             ti = t - T
                             C_Q[n, tt, i] += (
