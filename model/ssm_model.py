@@ -6,6 +6,7 @@ from model.utils_chain import Chain
 import numpy as np
 import multiprocessing as mp
 from functions.utils import _inverse_pmf
+from copy import deepcopy
 
 # %%
 def worker_function_sMC(chain_d, theta_new):   
@@ -62,7 +63,7 @@ class SSModel:
         self.update_theta_dist = model_interface.config["update_theta_dist"]
 
         # pass model structure for each chain
-        self.models_for_each_chain = [model_interface for d in range(self.D)]
+        self.models_for_each_chain = [deepcopy(model_interface) for d in range(self.D)]
         # store necessary models
         self.dist_model = model_interface.dist_model
 
@@ -126,12 +127,10 @@ class SSModel:
             traj_X = chains[d]._get_X_traj(chain_d.state.X, B)
             BB[d,:] = B
             state_W = chain_d.model_interface.transition_model_probability(traj_X)
-            WW[d] = state_W + np.log(model_W.max())
- 
-        
+            WW[d] = np.log(state_W) + np.log(model_W.max()) #log on both terms
         # find optimal parameters
-        W_theta = np.exp((WW - WW.max())/WW.max())
-        W_theta = W_theta / W_theta.sum()
+        W_theta = np.exp((WW - WW.max()) )#/WW.max()) #standard log-sum-exp, corrects weighted statistics - subtraction for stability, exp to get raw weights
+        W_theta = W_theta / W_theta.sum() #normalize sum to 1
 
         save_std = np.zeros(self._num_theta_to_estimate)
         for p, key in enumerate(self._theta_to_estimate):
@@ -186,9 +185,9 @@ class SSModel:
                     traj_X = chains[d]._get_X_traj(chains[d].state.X, B)
                     BB[d,:] = B
                     state_W = chains[d].model_interface.transition_model_probability(traj_X)
-                    WW[d] = state_W + np.log(model_W.max())
+                    WW[d] = np.log(state_W) + np.log(model_W.max()) #log on both terms
                 #record values over D chains and evolution of theta distributions
-                W_theta = np.exp((WW - WW.max())/WW.max())
+                W_theta = np.exp((WW - WW.max()) )#/WW.max()) #standard log-sum-exp, corrects weighted statistics
                 W_theta = W_theta / W_theta.sum()
                 theta_dist_mean = (theta_new[:,p]*W_theta).sum()
                 theta_dist_std = np.sqrt(sum((theta_new[:,p] - theta_dist_mean)**2 * W_theta)/(self.D-1.))
