@@ -49,6 +49,7 @@ import seaborn as sns
 # SET FOLDERS
 # ================================================================
 data_root = "/Users/simon/Desktop/SAS"
+data_resolution_root = "/Users/simon/Desktop/ORPB_resolution_datasets"
 result_root = "/Users/simon/Desktop/ORPB_results"
 
 if not os.path.exists(result_root):
@@ -58,8 +59,23 @@ if not os.path.exists(result_root):
 # ================================================================
 
 # ORPB isotope data
-data_df = pd.read_csv(f'{data_root}/ORPB_isotope_data.csv', index_col=0, parse_dates=[0])
-data_df = data_df.loc[pd.Timestamp('2014-08-01'): pd.Timestamp('2014-08-31')] #2014-08-01 - 2016-08-31subset to Putnam's data range
+# data_df = pd.read_csv(f'{data_root}/ORPB_isotope_data.csv', index_col=0, parse_dates=[0])
+
+#or use resolution data
+res = 'W' #'D'
+resolution = 'weekly' #'daily'
+data_df = pd.read_csv(f"/Users/simon/Desktop/ORPB_resolution_datasets/ORPB_isotope_data_isoMAP_precip 18O_{resolution}.csv", index_col=0, parse_dates=[0])
+data_df['precip 18O'] = data_df['mean_c']
+data_df['discharge (mm/hr)'] = data_df[f'discharge (mm/{res})'] # for convenience now
+data_df['baseflow 1 (mm/hr)'] = data_df[f'baseflow 1 (mm/{res})']
+data_df['snowmelt (mm/hr)'] = data_df[f'snowmelt (mm/{res})']
+data_df['rainfall (mm/hr)'] = data_df[f'rainfall (mm/{res})']
+data_df['ET (mm/hr)'] = data_df[f'ET (mm/{res})']
+
+
+data_df = data_df.loc[pd.Timestamp('2014-01-01'): pd.Timestamp('2014-12-31')] #2014-08-01 - 2016-08-31subset to Putnam's data range
+
+
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
 data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum(axis=1)
 
@@ -67,8 +83,12 @@ data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum
 data_df['quickflow (mm/hr)'] = data_df['discharge (mm/hr)'] - data_df['baseflow 1 (mm/hr)']
 data_df['bf1_weight'] = data_df['baseflow 1 (mm/hr)'] / data_df['discharge (mm/hr)']
 data_df['qf_weight'] = data_df['quickflow (mm/hr)'] / data_df['discharge (mm/hr)']
-isbaseflow = data_df.loc[(data_df['quickflow (mm/hr)']<0.001) & issample].index
-isquickflow = data_df.loc[(data_df['quickflow (mm/hr)']>=0.001) & issample].index
+# isbaseflow = data_df.loc[(data_df['quickflow (mm/hr)']<0.001) & issample].index
+# isquickflow = data_df.loc[(data_df['quickflow (mm/hr)']>=0.001) & issample].index
+
+# data_df['weekly_obs'] = ~data_df.loc[data_df['rainfall (mm/hr)']>0, 'Sample Name'].duplicated(keep='last') # make sure weekly values are only for when rain was actually observed (1066 obs values vs only 235 when observed without rain restriction)
+# data_df['weekly_obs'] = data_df['weekly_obs'].fillna(False) #set non-masked values to False i.e. where no rain observed
+# data_df.loc[data_df['weekly_obs']==False, 'precip 18O'] = np.nan # set non-weekly observed isotope values to nan so they don't influence GP fit
 
 data_df['is_obs_input'] = data_df['precip 18O'].notna()
 data_df['is_obs_input_filled'] = False
@@ -76,14 +96,16 @@ data_df.loc[data_df['precip 18O'].isna()==True, 'is_obs_input_filled']=True
 # fill nans in precip 18O with mean
 mean = data_df['precip 18O'].mean()
 df= data_df.copy() #make a copy of the data_df
-df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
+# df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
+df['precip 18O'] = df['precip 18O'].ffill().bfill()
+
 
 df['is_obs_output'] = df['ORPB 18O'].notna()
 
-case_name = 'storage_q_gg_et_u'#********************
+case_name = 'storage_q_ug_et_u'#********************
 
-num_input_scenarios = 3# 15 #N
-num_parameter_samples = 3#15 #D
+num_input_scenarios = 3# 15 #N particles
+num_parameter_samples = 3 #15 #D #may need to change this as I change isotope timeseries configurations (fewer obs mean fewer timesteps where particles get reweighted which affect the variance of the likelihood estimate)
 len_parameter_MCMC = 2#5 #L
 
 #%%
@@ -99,7 +121,7 @@ config = {
     'use_MAP_AS_weight': True,
     'use_MAP_ref_traj': True,
     'use_MAP_MCMC': True,
-    'update_theta_dist': False,
+    'update_theta_dist': True, #False,
 }
 
 model_interface_class = ModelInterfaceMesas
@@ -111,6 +133,14 @@ if case_name == 'storage_q_gg_et_u':
         num_input_scenarios=num_input_scenarios,
         config=config,
         theta_init=theta_storage_q_gg_et_u
+    )
+elif case_name == 'storage_q_ug_et_u':
+    model_interface = model_interface_class(
+        df=df,
+        customized_model=SAS_Model,
+        num_input_scenarios=num_input_scenarios,
+        config=config,
+        theta_init=theta_storage_q_ug_et_u
     )
 elif case_name == 'storage_q_u_et_u':
     model_interface = model_interface_class(
@@ -241,10 +271,59 @@ model.run_particle_Gibbs()
 theta = model.theta_record
 theta_name = model_interface._theta_to_estimate
 theta_df = pd.DataFrame(theta, columns=theta_name)
+theta_std = model.theta_std
+theta_std_df = pd.DataFrame(theta_std, columns=theta_name)
+state_record = model.state_record #used in ORPB_SAS_check.py
 
 input_scenarios = model.input_record
 output_scenarios = model.output_record
 df = model_interface.df
+
+# MLE SAS model output from the last MCMC iteration's best run
+pQ_mle = model.pQ_mle['discharge (mm/hr)']  # shape: (max_age, T)
+sT_mle = model.sT_mle                        # shape: (max_age, T)
+ST_mle = model.ST_mle                        # shape: (max_age, T)
+# CDF over age = cumulative TTD in discharge at each time t
+PQ_mle = np.cumsum(pQ_mle, axis=0) * config['dt']
+
+#%%
+
+# ANALYSIS AND PLOTTING
+# ===============================================================
+# Plot distributions of theta parameters
+from scipy.stats import gaussian_kde
+def kde_mode(samples):
+    """Estimate mode of continuous samples using KDE."""
+    samples = samples[~np.isnan(samples)]
+    kde = gaussian_kde(samples)
+    x = np.linspace(samples.min(), samples.max(), 1000)
+    return x[np.argmax(kde(x))]
+
+means = theta_df.iloc[1]
+stds = theta_std_df.iloc[1]
+ncols = 3
+nrows = int(np.ceil((len(means)-3)/ncols))
+fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+axes = axes.flatten()
+for i in range(len(means)-3):
+    mean = means[i]
+    std = stds[i]
+    qfa_hist = np.random.normal(loc=mean, scale=std, size=10000)
+    # mode = kde_mode(qfa_hist)
+    # Plot histogram
+    ax = axes[i]
+    ax.hist(qfa_hist, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+
+    ax.set_title(f'{theta_df.columns[i]}')
+    ax.set_xlabel('Value')
+    ax.set_ylabel('Frequency')
+    ax.axvline(mean, color='red', linestyle='--', label=f'Mean = {mean}')
+    # ax.axvline(mode, color='green', linestyle='--', label=f'Mode = {mode}')
+    ax.legend()
+for j in range(i+1, len(axes)):
+    axes[j].set_visible(False)
+fig.tight_layout()
+plt.show()
 
 
 #%% plot each MCMC iteration output against observed
@@ -269,27 +348,69 @@ for i in range(len_parameter_MCMC + 1):
         label="observed",
     )
     plt.plot(
-        time[st:et], output_scenarios[i, st:et].T, color="orange", label="predicted"
+        time[st:et], output_scenarios[i, st:et].T, color="orange", alpha=0.4, label="predicted"
     )
     plt.title(f'pMCMC iteration {i}')
+    plt.xlabel('Date')
+    plt.ylabel('delta 18O in stream (per mil)')
     # plt.xlim([time[0], time[-1]])
 #     plt.plot(model_interface.df.index[st:et], output_scenarios[i, st:et].T,   label=f"output {i}", lw=0.5)
 plt.legend(frameon=False)
 # np.save(f"output.npy", output_scenarios)
 plt.show()
 
+
+#%%
+# Plot TTD
+ST = (ST_mle[:,:-1] + ST_mle[:,1:])/2
+T = 1*np.arange(pQ_mle.shape[0]) # model.options['dt'] *np.arange(model.options['max_age']) #max age is 1st dim of pq and ST
+import matplotlib.cm as cm
+cmap = plt.get_cmap('viridis')
+colors = [cmap(i) for i in np.linspace(0,1,len(df))]
+fig, ax = plt.subplots()
+for i in range(0, len(df)):
+    # plt.plot(ST[:,i],pQ_mle[:,i], color=colors[i]) #density
+    # plt.plot(ST[:,i],sas_age_cdf_mle[:,i], color=colors[i]) #cumulative
+    plt.plot(T, pQ_mle[:,i], color=colors[i]) #TTD
+plt.xlabel('Age (days)')
+plt.ylabel('$p_Q$')
+plt.title('Discharge SAS function over time')
+# plt.xlim([0, 25])
+sm = cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0,
+vmax=len(df)-1))
+plt.colorbar(sm, ax=ax, label='Time Index')
+
+# %% Cumulative TTD
+cmap = plt.get_cmap('viridis')
+colors = [cmap(i) for i in np.linspace(0,1,len(df))]
+fig, ax = plt.subplots()
+for i in range(0, len(df)):
+    plt.plot(T, PQ_mle[:,i], color=colors[i]) #TTD
+plt.xlabel('Age (days)')
+plt.ylabel('P_Q$')
+plt.title('Cumulative Discharge SAS function over time')
+sm = cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0,
+vmax=len(df)-1))
+plt.colorbar(sm, ax=ax, label='Time Index')
+
+
+
 # %%
 # # save data as csv files
-theta_df.to_csv(f"{result_root}/theta_{case_name}_1M.csv")
+theta_df.to_csv(f"{result_root}/theta_{case_name}_3Y.csv")
+theta_std_df.to_csv(f"{result_root}/theta_std_{case_name}_3Y.csv")
+np.savetxt(f"{result_root}/input_scenarios_{case_name}_3Y.csv", input_scenarios, delimiter=",")
+np.savetxt(f"{result_root}/output_scenarios_{case_name}_3Y.csv", output_scenarios, delimiter=",")
 
-np.savetxt(f"{result_root}/input_scenarios_{case_name}_1M.csv", input_scenarios, delimiter=",")
-np.savetxt(f"{result_root}/output_scenarios_{case_name}_1M.csv", output_scenarios, delimiter=",")
+np.save(f"{result_root}/pQ_mle_{case_name}.npy", pQ_mle)
+np.save(f"{result_root}/sT_mle_{case_name}.npy", sT_mle)
+np.save(f"{result_root}/ST_mle_{case_name}.npy", ST_mle)
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
 
-input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_1yr.csv", delimiter=",", header=None)
-output_scenarios = pd.read_table(f"{result_root}/output_scenarios_{case_name}_1yr.csv", delimiter=",", header=None)
+input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_W1Y_job25102382.csv", delimiter=",", header=None)
+output_scenarios = pd.read_table(f"{result_root}/output_scenarios_{case_name}_W1Y_job25102382.csv", delimiter=",", header=None)
 time = df.index
 st, et = df.index.get_loc(df['ORPB 18O'].first_valid_index()), df.index.get_loc(df['ORPB 18O'].last_valid_index())
 
@@ -320,12 +441,14 @@ for i in range(len_parameter_MCMC + 1):
 
     plt.step(
         time[st:et],
-        (df["ORPB 18O"].backfill().iloc[st:et]).to_numpy() - (output_scenarios.iloc[i, st:et].T).to_numpy(),
+        (df["ORPB 18O"].backfill().iloc[st:et]).to_numpy() - (output_scenarios[i, st:et].T),
         label="residuals",
     )
     plt.axhline(0, color='black', linestyle='--')
     plt.title(f'pMCMC iteration {i} residuals')
+    plt.xlabel('Date')
+    plt.ylabel('Residuals')
     # print(f'Mean residuals at iteration {i}: {np.mean((df["ORPB 18O"].backfill().iloc[st:et]).to_numpy() - (output_scenarios.iloc[i, st:et].T).to_numpy())}')
 plt.legend(frameon=False)
-plt.show()
+# plt.show()
 # %%
