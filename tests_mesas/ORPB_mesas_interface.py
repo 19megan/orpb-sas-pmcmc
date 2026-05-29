@@ -895,6 +895,30 @@ class ModelInterfaceMesas:
         return C_Q
 
     def transition_model_probability(self, X_1toT: np.ndarray) -> np.ndarray:
+        """Process model log-likelihood p_f(X_{1:T} | theta) for the MESAS convolution.
+
+        Returns 1.0 by design, not as a placeholder. The MESAS transition model
+        (the convolution C_Q(t) = sum_T C_J(t-T) * pQ(T,t) * Omega(T,t) + C_old * (1 - PQ_max))
+        is deterministic given (R_t, pQ, Omega, C_old, theta). The conditional density
+        p(X_t | X_{t-1}, theta) is therefore a Dirac delta along the propagated path,
+        which evaluates to 1 for every particle by construction.
+
+        Stochasticity in this framework enters only through:
+            - input scenario generation in _bulk_input_preprocess (R_t)
+            - initial state sampling in initial_state_model (C_old)
+            - particle ancestry resampling in the filter
+        All three are accounted for elsewhere -- p_f does not contribute new information.
+
+        Override this only if process noise is added to the convolution
+        (e.g. C_Q(t) = [convolution] + eps_t with eps_t ~ N(0, sigma_proc)).
+        In that case, return sum_t log N(X_t - prediction(t); 0, sigma_proc).
+
+        Args:
+            X_1toT (np.ndarray): state trajectory of one particle, shape [T]
+
+        Returns:
+            float: 1.0 (correct value for a deterministic transition)
+        """
         return 1.0
 
     def observation_model(self, Xk: np.ndarray) -> np.ndarray:
