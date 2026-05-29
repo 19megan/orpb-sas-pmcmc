@@ -450,19 +450,32 @@ class ModelInterface:
         return Xt[:, 1:]  # return w/out initial state
 
     def transition_model_probability(self, X_1toT: np.ndarray) -> np.ndarray:
-        """State estimaton model f_theta(Xt-1, Rt)
+        """Process model log-likelihood p_f(X_{1:T} | theta).
 
-        Currently set up for linear reservoirmodel:
-            p(Xt|Xtm1) = (1 - k * delta_t) * Xtm1 + delta_t * Rt,
-                where Rt = N(Ut, theta_r) from input model
-            p(Xt|Xtm1) = N((1 - k * delta_t) * Xtm1 + delta_t * Ut, delta_t * theta_r)    
+        Returns 1.0 by design for the deterministic case. For a stochastic
+        process model, this should return sum_t log p(X_t | X_{t-1}, theta).
+
+        Linear reservoir example (commented out below) demonstrates the
+        stochastic case: the transition is
+            X_t = (1 - k * dt) * X_{t-1} + dt * R_t,   R_t ~ N(U_t, theta_r)
+        which makes X_t conditionally Gaussian:
+            p(X_t | X_{t-1}) = N((1 - k*dt)*X_{t-1} + dt*U_t, dt*theta_r)
+        The log-PDF of the trajectory under this distribution is a real
+        process model log-likelihood and would enter Eq. 3.16 alongside the
+        observation likelihood.
+
+        For deterministic transition models (e.g., the MESAS convolution),
+        p(X_t | X_{t-1}, theta) is a Dirac delta along the propagated path,
+        which evaluates to 1 for every particle by construction. Return 1.0
+        in that case (see ORPB_mesas_interface.transition_model_probability).
 
         Args:
             X_1toT (np.ndarray): state X at t = 1:T
 
         Returns:
-            np.ndarray: p(X_{1:T}|theta)
+            float | np.ndarray: log p(X_{1:T} | theta), or 1.0 if deterministic
         """
+        # # Linear reservoir example -- uncomment if process noise is modeled.
         # # Get parameters
         # theta = self.theta.transition_model
         # theta_k = theta[0]
@@ -478,7 +491,7 @@ class ModelInterface:
         # # calculate prob
         # prob = ss.norm(
         #     (1 - theta_k * theta_dt) * Xtm1 + theta_dt * Ut, theta_r * (theta_dt)
-        # ).logpdf(Xt) 
+        # ).logpdf(Xt)
 
         # return prob.sum()
         return 1.
