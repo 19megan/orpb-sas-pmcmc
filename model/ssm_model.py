@@ -125,7 +125,6 @@ class SSModel:
         gives a single consistent MLE for both serial and parallel paths.
         """
         mle_interface = self.models_for_each_chain[0]
-        # Use weighted posterior means, not the hybrid in theta_modeled
         mle_interface.update_theta(self.theta_record[-1, :])
         self.pQ_mle = {flux: mle_interface.model.get_pQ(flux)
                        for flux in mle_interface.model.fluxorder}
