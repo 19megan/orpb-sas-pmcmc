@@ -72,6 +72,7 @@ from model.ssm_model import SSModel
 from mesas.sas.model import Model as SAS_Model
 
 from ORPB_cases import *  # noqa: F401,F403  (theta_init constants)
+from functions.run_config import save_run_config, set_run_seed
 
 
 # ----------------------------------------------------------------------------
@@ -104,6 +105,8 @@ def parse_args():
                    help="Suffix added to output filenames (e.g. '_1Y', '_3Y_run01')")
     p.add_argument("--no-plot", action="store_true",
                    help="Skip plotting (use on HPC / headless nodes)")
+    p.add_argument("--seed", type=int, default=42,
+                   help="numpy random seed; recorded in run_config snapshot")
     return p.parse_args()
 
 
@@ -111,7 +114,11 @@ def parse_args():
 # DATA LOADING (mirrors the original script)
 # ----------------------------------------------------------------------------
 def load_data(args):
-    res = "h" if args.resolution == "hourly" else "D"
+    res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "M"}
+    if args.resolution not in res_map:
+        raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
+    res = res_map[args.resolution]
+
     fname = f"ORPB_isotope_data_isoMAP_precip 18O_{args.resolution}.csv"
     data_df = pd.read_csv(os.path.join(args.data_root, fname),
                           index_col=0, parse_dates=[0])
@@ -160,13 +167,16 @@ def build_model_interface(args, df):
     if args.case_name not in theta_lookup:
         raise ValueError(f"Case name not found: {args.case_name}")
 
-    return ModelInterfaceMesas(
+    theta_init = theta_lookup[args.case_name]
+
+    model_interface = ModelInterfaceMesas(
         df=df,
         customized_model=SAS_Model,
         num_input_scenarios=args.num_particles,
         config=config,
-        theta_init=theta_lookup[args.case_name],
+        theta_init=theta_init,
     )
+    return model_interface, config, theta_init
 
 
 # ----------------------------------------------------------------------------
@@ -181,15 +191,19 @@ def save_results(args, model, model_interface):
         os.path.join(args.result_root, f"theta_{tag}.csv"))
     pd.DataFrame(model.theta_std, columns=theta_name).to_csv(
         os.path.join(args.result_root, f"theta_std_{tag}.csv"))
-    pd.DataFrame(model.theta_modeled, columns=theta_name).to_csv(
-        os.path.join(args.result_root, f"theta_modeled_{tag}.csv"))
     np.savetxt(os.path.join(args.result_root, f"input_scenarios_{tag}.csv"),
                model.input_record, delimiter=",")
     np.savetxt(os.path.join(args.result_root, f"output_scenarios_{tag}.csv"),
                model.output_record, delimiter=",")
     np.savetxt(os.path.join(args.result_root, f"state_record_{tag}.csv"),
                model.state_record, delimiter=",")
-
+    np.savetxt(os.path.join(args.result_root, f"pQ_mle_{tag}.csv"),
+               model.pQ_mle['discharge (mm/hr)'], delimiter=",")
+    np.savetxt(os.path.join(args.result_root, f"sT_mle_{tag}.csv"),
+               model.sT_mle, delimiter=",")
+    np.savetxt(os.path.join(args.result_root, f"ST_mle_{tag}.csv"),
+               model.ST_mle, delimiter=",")
+    
     try:
         import dill
         session_path = os.path.join(args.result_root, f"session_{tag}.pkl")
@@ -230,6 +244,9 @@ def make_plots(args, model, model_interface):
 def main():
     args = parse_args()
 
+    # Reproducibility: set seed BEFORE any sampling (model_interface init draws thetas).
+    set_run_seed(args.seed)
+
     # On HPC nodes there is no display; force a non-interactive backend.
     if args.no_plot or not sys.stdout.isatty():
         matplotlib.use("Agg", force=True)
@@ -243,11 +260,12 @@ def main():
 
     print(f"[info] parallel={args.parallel}  num_cores={args.num_cores}  "
           f"N={args.num_particles} D={args.num_samples} L={args.num_mcmc}  "
-          f"case={args.case_name}  range={args.start_date}..{args.end_date}",
+          f"case={args.case_name}  range={args.start_date}..{args.end_date}  "
+          f"seed={args.seed}",
           flush=True)
 
     df = load_data(args)
-    model_interface = build_model_interface(args, df)
+    model_interface, config, theta_init = build_model_interface(args, df)
 
     model = SSModel(
         model_interface=model_interface,
@@ -262,6 +280,34 @@ def main():
 
     save_results(args, model, model_interface)
     make_plots(args, model, model_interface)
+
+    # Snapshot the run config alongside results (for reproducibility / auditing).
+    tag = f"{args.case_name}{args.run_tag}"
+    res_code = "h" if args.resolution == "hourly" else "D"
+    extra = {
+        "parallel": args.parallel,
+        "num_cores": args.num_cores,
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "slurm_cpus_per_task": os.environ.get("SLURM_CPUS_PER_TASK"),
+        "hostname": os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME"),
+    }
+    save_run_config(
+        out_path=os.path.join(args.result_root, f"run_config_{tag}.json"),
+        case_name=args.case_name,
+        config=config,
+        N=args.num_particles,
+        D=args.num_samples,
+        L=args.num_mcmc,
+        date_start=df.index[0],
+        date_end=df.index[-1],
+        resolution=res_code,
+        data_source=f"ORPB_isotope_data_isoMAP_precip 18O_{args.resolution}.csv",
+        theta_to_estimate=model_interface._theta_to_estimate,
+        theta_init=theta_init,
+        seed=args.seed,
+        extra=extra,
+    )
+
     print("[info] done", flush=True)
 
 
