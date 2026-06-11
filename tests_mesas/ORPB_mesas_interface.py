@@ -53,11 +53,19 @@ class ParamsProcessor:
             self.transit_params["not_to_estimate"].append(name)
         elif mode == "to_estimate":
             is_C_old = param_key == "C_old"
+            has_per_param_prior = ( #checks for prior for >1 param in a sas_func
+                "priors" in sas_func.keys() and param_key in sas_func["priors"]
+            )
             is_prior_defined = (
                 "prior" in sas_func.keys() or "prior_dis" in sas_func.keys()
             )
 
-            if is_prior_defined:
+            if has_per_param_prior:
+                self.transit_params["to_estimate"].append(name)
+                self.params["to_estimate"][name] = sas_func["priors"][param_key]
+                #don't delete priors yet
+
+            elif is_prior_defined:
 
                 self.transit_params["to_estimate"].append(name)
 
@@ -183,6 +191,8 @@ class ParamsProcessor:
                 self.setup_prior_params(
                     "to_estimate", flux, sas_name, "scale", sas_func
                 )
+        if "priors" in sas_func.keys():
+            del sas_func["priors"] #can delete priors only after all param priors have been set
 
     def set_obs_uncertainty(self, obs_uncertainty):
         for key, values in obs_uncertainty.items(): # e.g. key='sigma observed C in', values={'prior_dis': 'normal', 'prior_params': [0.05, 0.02], 'is_nonnegative': True}
