@@ -11,6 +11,14 @@ if HIGHEST_LEVEL not in sys.path:
     sys.path.insert(0, HIGHEST_LEVEL)
 
 #note: this is a library module, so it will always be imported
+# this file lives in mesas.stochastic/tests_mesas — go up two levels for repo root
+# _here = os.path.dirname(os.path.abspath(__file__)) #Rockfish uses these lines to find the highest level
+# REPO_ROOT = os.path.dirname(_here)
+# HIGHEST_LEVEL = os.path.dirname(REPO_ROOT)
+# if HIGHEST_LEVEL not in sys.path:
+#     sys.path.insert(0, HIGHEST_LEVEL)
+# if REPO_ROOT not in sys.path:
+#     sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
 from dataclasses import dataclass
@@ -786,6 +794,9 @@ class ModelInterfaceMesas:
         # Get solute factors for each solute
         temp_model = self.model.copy_without_results()
         temp_model._data_df = temp_df
+        
+        #cut pre-pool deepcopy cost by stripping bulky results from self.model
+        self.model = self.model.copy_without_results()
         # Fix: override solute_parameters in the copied model
         for sol_in in self.conc_pairs.keys():
             temp_model.solute_parameters[sol_in]['C_old'] = 1.0
