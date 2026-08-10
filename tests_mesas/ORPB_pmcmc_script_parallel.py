@@ -74,6 +74,9 @@ from mesas.sas.model import Model as SAS_Model
 from ORPB_cases import *  # noqa: F401,F403  (theta_init constants)
 from functions.run_config import save_run_config, set_run_seed
 
+#ignore warnings on division by zero in normalize_over_interval
+np.seterr(divide='ignore', invalid='ignore')
+
 
 # ----------------------------------------------------------------------------
 # CLI
@@ -107,6 +110,8 @@ def parse_args():
                    help="Skip plotting (use on HPC / headless nodes)")
     p.add_argument("--seed", type=int, default=42,
                    help="numpy random seed; recorded in run_config snapshot")
+    p.add_argument("--notes", default="",
+                   help="Additional notes for the run")
     return p.parse_args()
 
 
@@ -114,7 +119,7 @@ def parse_args():
 # DATA LOADING (mirrors the original script)
 # ----------------------------------------------------------------------------
 def load_data(args):
-    res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "M"}
+    res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "ME"}
     if args.resolution not in res_map:
         raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
     res = res_map[args.resolution]
@@ -124,8 +129,8 @@ def load_data(args):
                           index_col=0, parse_dates=[0])
 
     data_df["precip 18O"] = data_df["mean_c"]
-    for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"):
-        data_df[f"{col} (mm/hr)"] = data_df[f"{col} (mm/{res})"]
+    # for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"): #only neeed for diff res datasets now all datasets are the same model resolution
+    #     data_df[f"{col} (mm/hr)"] = data_df[f"{col} (mm/{res})"]
 
     data_df = data_df.loc[pd.Timestamp(args.start_date): pd.Timestamp(args.end_date)]
 
@@ -159,6 +164,7 @@ def build_model_interface(args, df):
     }
 
     theta_lookup = {
+        "storage_q_ug_et_u_cp": theta_storage_q_ug_et_u_cp,  # noqa: F405
         "storage_q_gg_et_u": theta_storage_q_gg_et_u,  # noqa: F405
         "storage_q_ug_et_u": theta_storage_q_ug_et_u,  # noqa: F405
         "storage_q_u_et_u":  theta_storage_q_u_et_u,   # noqa: F405
@@ -191,6 +197,10 @@ def save_results(args, model, model_interface):
         os.path.join(args.result_root, f"theta_{tag}.csv"))
     pd.DataFrame(model.theta_std, columns=theta_name).to_csv(
         os.path.join(args.result_root, f"theta_std_{tag}.csv"))
+    pd.DataFrame(model.ess_record, columns=theta_name).to_csv(
+        os.path.join(args.result_root, f"ess_record_{tag}.csv"))
+    pd.DataFrame(model.varll_record, columns=theta_name).to_csv(
+        os.path.join(args.result_root, f"varll_record_{tag}.csv"))
     np.savetxt(os.path.join(args.result_root, f"input_scenarios_{tag}.csv"),
                model.input_record, delimiter=",")
     np.savetxt(os.path.join(args.result_root, f"output_scenarios_{tag}.csv"),
@@ -283,7 +293,10 @@ def main():
 
     # Snapshot the run config alongside results (for reproducibility / auditing).
     tag = f"{args.case_name}{args.run_tag}"
-    res_code = "h" if args.resolution == "hourly" else "D"
+    res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "ME"}
+    if args.resolution not in res_map:
+        raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
+    res_code = res_map[args.resolution]
     extra = {
         "parallel": args.parallel,
         "num_cores": args.num_cores,
@@ -306,6 +319,7 @@ def main():
         theta_init=theta_init,
         seed=args.seed,
         extra=extra,
+        notes=args.notes
     )
 
     print("[info] done", flush=True)
