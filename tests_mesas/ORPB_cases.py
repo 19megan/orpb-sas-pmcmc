@@ -173,15 +173,16 @@ sas_specs_storage_q_g_et_u = {
 }
 
 import pandas as pd
-tag='D2Y' #NOTE: must change this depending on run
+tag='D_std' #NOTE: must change this depending on run
 sTmT = pd.read_csv(f'/Users/simon/Desktop/ORPB_resolution_datasets/sT_mT_init_{tag}.csv')
 sT_init = sTmT['sT_init'].values
+mT_init = sTmT['mT_init'].values
 
 #c_old=-7.6
-solute_parameters = {'precip 18O': {'C_old': -7.28, 'observations': 'ORPB 18O', 'mT_init': 'mT_spinup'}
+solute_parameters = {'precip 18O': {'C_old': -7.28, 'observations': 'ORPB 18O', 'mT_init': mT_init}
                      }
 
-options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'sT_init': sT_init}#, 'max_age': 730} #8760/12 hours ~1month or up to 4380 for 6months #set max age to reduce memory errors
+options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'sT_init': sT_init}#, 'max_age': 2160} #8760/12 hours ~1month or up to 4380 for 6months #set max age to reduce memory errors
 
 obs_uncertainty = {
     # sig_u
