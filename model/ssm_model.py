@@ -54,6 +54,11 @@ def worker_function_AS(chain_d, theta_new, prev_state):
     Y_traj = chain_d._get_Y_traj(chain_d.state.Y, B)
     return WW, B, R_traj, traj_X, Y_traj, chain_d.state
 
+
+# Legacy names kept so any external callers don't break.
+worker_function_sMC = worker_function_SIR
+worker_function_pMCMC = worker_function_AS
+
 #%%
 class SSModel:
     def __init__(
@@ -96,6 +101,12 @@ class SSModel:
         self.theta_std = np.zeros(
             (self.L+1, self._num_theta_to_estimate)
             )
+        self.ess_record = np.zeros(
+            (self.L+1, self._num_theta_to_estimate)
+            )
+        self.varll_record = np.zeros(
+            (self.L+1, self._num_theta_to_estimate)
+            )
         
         # TODO: assume one input for now
         self.input_record = np.zeros(
@@ -126,6 +137,7 @@ class SSModel:
         """
         mle_interface = self.models_for_each_chain[0]
         mle_interface.update_theta(self.theta_record[-1, :])
+        mle_interface.model.run()   # results were stripped by _init_sas_model(); regenerate for the final theta
         self.pQ_mle = {flux: mle_interface.model.get_pQ(flux)
                        for flux in mle_interface.model.fluxorder}
         self.sT_mle = mle_interface.model.get_sT()
@@ -288,10 +300,20 @@ class SSModel:
 
         # Persistent pool reused across all MCMC iterations to avoid the cost
         # of spawning Python workers each time.
-        with mp.Pool(processes=num_cores) as pool:
+        # with mp.Pool(processes=num_cores) as pool:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=num_cores) as pool: #catches OOM workers
             # Initial SIR pass for each of D theta candidates
             args_list = [(chains[d], theta_new[d, :]) for d in range(self.D)]
-            results = pool.starmap(worker_function_SIR, args_list)
+            futures = [pool.submit(worker_function_SIR, *args) for args in args_list] #for ProcessPoolExecutor
+            from concurrent.futures.process import BrokenProcessPool
+            try:
+                results = [f.result() for f in futures]
+            except BrokenProcessPool:
+                print('[fatal] a worker died (likely OOM) - aborting', flush=True)
+                raise
+            print(f'[info] initial SIR pass complete, entering MCMC loop', flush=True) #know if SIR finishes or if it's getting stuck here
+            # results = pool.starmap(worker_function_SIR, args_list) #for mp.Pool
             for d in range(self.D):
                 (WW[d], BB[d, :], R_trajs[d], X_trajs[d], Y_trajs[d],
                  chain_states[d]) = results[d]
@@ -330,13 +352,22 @@ class SSModel:
 
                     args_list = [(chains[d], theta_new[d, :], chain_states[d])
                                  for d in range(self.D)]
-                    results = pool.starmap(worker_function_AS, args_list)
+                    futures = [pool.submit(worker_function_AS, *args) for args in args_list] #for ProcessPoolExecutor
+                    results = [f.result() for f in futures]
+                    # results = pool.starmap(worker_function_AS, args_list) #for mp.Pool
                     for d in range(self.D):
                         (WW[d], BB[d, :], R_trajs[d], X_trajs[d], Y_trajs[d],
                          chain_states[d]) = results[d]
 
                     W_theta = np.exp(WW - WW.max())
                     W_theta = W_theta / W_theta.sum()
+                     # --- diagnostics: importance-weight health per (l, p) ---
+                    ess = 1.0 / np.sum(W_theta ** 2)          # effective sample size, <= D
+                    var_loglik = np.var(WW)                   # particle-filter log-lik spread
+                    self.ess_record[l + 1, p] = ess
+                    self.varll_record[l + 1, p] = var_loglik
+                    # -------------------------------------------------------
+
                     theta_dist_mean = (theta_new[:, p] * W_theta).sum()
                     theta_dist_std = np.sqrt(sum((theta_new[:, p] - theta_dist_mean) ** 2 * W_theta) / (self.D - 1.))
                     save_std[p] = theta_dist_std
