@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orpb-sas-pmcmc"
+version = "0.1.0"
+description = "ORPB stochastic SAS / particle MCMC work, built on mesas"
+requires-python = ">=3.9"
+dependencies = [
+    "mesas @ git+https://github.com/19megan/mesas.git@fix/copy_without_results",
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+    "seaborn",
+    "dill",
+    "permetrics",
+    "hydroeval",
+    "astropy",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orpb_stochastic*"]
