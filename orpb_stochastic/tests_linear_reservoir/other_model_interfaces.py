@@ -7,8 +7,8 @@ if current_path[-22:] != 'tests_linear_reservoir':
 import sys
 sys.path.append('../') 
 
-from model.model_interface import ModelInterface
-from functions.utils import normalize_over_interval
+from orpb_stochastic.model.model_interface import ModelInterface
+from orpb_stochastic.functions.utils import normalize_over_interval
 import scipy.stats as ss
 import numpy as np
 import pandas as pd

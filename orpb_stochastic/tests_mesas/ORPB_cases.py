@@ -173,7 +173,7 @@ sas_specs_storage_q_g_et_u = {
 }
 
 import pandas as pd
-tag='D_std' #NOTE: must change this depending on run
+tag='D_std_3M' #NOTE: must change this depending on run
 sTmT = pd.read_csv(f'/Users/simon/Desktop/ORPB_resolution_datasets/sT_mT_init_{tag}.csv')
 sT_init = sTmT['sT_init'].values
 mT_init = sTmT['mT_init'].values

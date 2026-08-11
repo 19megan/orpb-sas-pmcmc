@@ -9,7 +9,7 @@ import sys
 
 sys.path.append("../")
 
-from functions.get_dataset import get_different_input_scenarios
+from orpb_stochastic.functions.get_dataset import get_different_input_scenarios
 from tests_linear_reservoir.test_utils import *
 import pandas as pd
 from tests_linear_reservoir.other_model_interfaces import ModelInterfaceBulk, ModelInterfaceBulkFineInput

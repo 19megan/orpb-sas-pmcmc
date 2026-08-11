@@ -1,10 +1,10 @@
 # %%
-from model.model_interface import ModelInterface
-from model.ssm_model import SSModel
-from model.your_model import LinearReservoir
-from model.utils_chain import Chain
+from orpb_stochastic.model.model_interface import ModelInterface
+from orpb_stochastic.model.ssm_model import SSModel
+from orpb_stochastic.model.your_model import LinearReservoir
+from orpb_stochastic.model.utils_chain import Chain
 
-from functions.utils import plot_MAP
+from orpb_stochastic.functions.utils import plot_MAP
 import numpy as np
 import pandas as pd
 from typing import Optional, List, Any

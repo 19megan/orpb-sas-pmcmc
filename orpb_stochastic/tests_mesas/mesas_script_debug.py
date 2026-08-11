@@ -10,16 +10,16 @@ import sys
 
 sys.path.append("../")
 
-from functions.get_dataset import get_different_input_scenarios
+from orpb_stochastic.functions.get_dataset import get_different_input_scenarios
 import pandas as pd
 
 from tests_mesas.mesas_interface import ModelInterfaceMesas
 import matplotlib.pyplot as plt
 import numpy as np
-from model.utils_chain import Chain
-from functions.utils import plot_MAP
+from orpb_stochastic.model.utils_chain import Chain
+from orpb_stochastic.functions.utils import plot_MAP
 
-from model.ssm_model import SSModel
+from orpb_stochastic.model.ssm_model import SSModel
 from mesas.sas.model import Model as SAS_Model
 import argparse
 from mesas.sas.specs import Component

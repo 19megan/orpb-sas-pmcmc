@@ -1,24 +1,6 @@
 # This script is a copy of mesas_interface.py to customize for ORPB data
 # Date created: 11/12/2025
 # %%
-import os
-import sys
-
-
-# Path to the folder that contains 'mesas.stochastic'
-HIGHEST_LEVEL = r"C:\Users\simon\Desktop\mesas" #ensures repo root is on sys.path
-if HIGHEST_LEVEL not in sys.path:
-    sys.path.insert(0, HIGHEST_LEVEL)
-
-#note: this is a library module, so it will always be imported
-# this file lives in mesas.stochastic/tests_mesas — go up two levels for repo root
-# _here = os.path.dirname(os.path.abspath(__file__)) #Rockfish uses these lines to find the highest level
-# REPO_ROOT = os.path.dirname(_here)
-# HIGHEST_LEVEL = os.path.dirname(REPO_ROOT)
-# if HIGHEST_LEVEL not in sys.path:
-#     sys.path.insert(0, HIGHEST_LEVEL)
-# if REPO_ROOT not in sys.path:
-#     sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
 from dataclasses import dataclass
@@ -26,7 +8,7 @@ import scipy.stats as ss
 import pandas as pd
 from typing import Optional, Any, List
 from mesas.sas.model import Model as SAS_Model
-from functions.utils import normalize_over_interval
+from orpb_stochastic.functions.utils import normalize_over_interval
 from copy import deepcopy
 
 import matplotlib.pyplot as plt

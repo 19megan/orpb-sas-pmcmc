@@ -68,11 +68,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from ORPB_mesas_interface import ModelInterfaceMesas
-from model.ssm_model import SSModel
+from orpb_stochastic.model.ssm_model import SSModel
 from mesas.sas.model import Model as SAS_Model
 
 from ORPB_cases import *  # noqa: F401,F403  (theta_init constants)
-from functions.run_config import save_run_config, set_run_seed
+from orpb_stochastic.functions.run_config import save_run_config, set_run_seed
 
 #ignore warnings on division by zero in normalize_over_interval
 np.seterr(divide='ignore', invalid='ignore')

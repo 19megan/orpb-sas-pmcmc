@@ -10,14 +10,14 @@ import sys
 
 sys.path.append("../")
 
-from functions.get_dataset import get_different_input_scenarios
+from orpb_stochastic.functions.get_dataset import get_different_input_scenarios
 import pandas as pd
 
 from tests_mesas.mesas_interface import ModelInterfaceMesas
 import matplotlib.pyplot as plt
 import numpy as np
-from model.utils_chain import Chain
-from functions.utils import plot_MAP
+from orpb_stochastic.model.utils_chain import Chain
+from orpb_stochastic.functions.utils import plot_MAP
 
 # %%
 # SET FOLDERS

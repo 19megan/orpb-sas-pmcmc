@@ -4,24 +4,15 @@
 import os
 import sys
 
-script_folder = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, script_folder) #sys.path is the list of directories python searches for modules/packages
-
-REPO_ROOT = r"C:\Users\simon\Desktop\mesas" #ensure mesas and mesas.sas are importable
-SAS_FOLDER = os.path.join(REPO_ROOT, "mesas", "sas") 
-STOCHASTIC_FOLDER = os.path.join(REPO_ROOT, "mesas.stochastic") #ensure mesas.stochastic and submodules are importable
-os.environ['PATH'] = SAS_FOLDER + os.pathsep + os.environ.get('PATH', '') #ensures windows can find the dlls in sas for compiled .pyd extentions
-sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, STOCHASTIC_FOLDER)
 
 # Clear previously imported modules to ensure fresh import of edited files
 modules_to_clear = [
     "ORPB_mesas_interface",
     "mesas.sas.model",
-    "mesas.sas.utils_chain",
-    "mesas.sas.ssm_model",
     "mesas.sas.specs",
-    "utils"
+    "orpb_stochastic.model.utils_chain",
+    "orpb_stochastic.model.ssm_model",
+    "orpb_stochastic.functions.utils"
 ]
 for mod in modules_to_clear:
     if mod in sys.modules:
@@ -34,16 +25,16 @@ import pandas as pd
 from ORPB_mesas_interface import ModelInterfaceMesas
 import matplotlib.pyplot as plt
 import numpy as np
-from model.utils_chain import Chain
-from functions.utils import plot_MAP
+from orpb_stochastic.model.utils_chain import Chain
+from orpb_stochastic.functions.utils import plot_MAP
 
-from model.ssm_model import SSModel
+from orpb_stochastic.model.ssm_model import SSModel
 from mesas.sas.model import Model as SAS_Model
 import argparse
 from mesas.sas.specs import Component
 
 from ORPB_cases import *
-from functions.run_config import save_run_config, set_run_seed
+from orpb_stochastic.functions.run_config import save_run_config, set_run_seed
 import seaborn as sns
 
 # Reproducibility: set a fixed seed for this run. Change per-run if desired,

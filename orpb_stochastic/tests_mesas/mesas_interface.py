@@ -15,7 +15,7 @@ import scipy.stats as ss
 import pandas as pd
 from typing import Optional, Any, List
 from mesas.sas.model import Model as SAS_Model
-from functions.utils import normalize_over_interval
+from orpb_stochastic.functions.utils import normalize_over_interval
 from copy import deepcopy
 
 import matplotlib.pyplot as plt

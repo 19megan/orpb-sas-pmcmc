@@ -1,9 +1,9 @@
 # %%
-from model.model_interface import ModelInterface
+from orpb_stochastic.model.model_interface import ModelInterface
 import numpy as np
 import scipy.stats as ss
 from dataclasses import dataclass
-from functions.utils import _inverse_pmf
+from orpb_stochastic.functions.utils import _inverse_pmf
 from typing import Optional
 
 

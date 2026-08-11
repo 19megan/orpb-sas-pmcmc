@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 
-from functions.utils import plot_base, plot_bulk, create_bulk_sample
+from orpb_stochastic.functions.utils import plot_base, plot_bulk, create_bulk_sample
 from dataclasses import dataclass
 from typing import Optional, List
 # %%

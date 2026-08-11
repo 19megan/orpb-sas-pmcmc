@@ -1,11 +1,11 @@
 # %%
 from typing import Optional
 from tqdm import tqdm
-from model.model_interface import ModelInterface
-from model.utils_chain import Chain
+from orpb_stochastic.model.model_interface import ModelInterface
+from orpb_stochastic.model.utils_chain import Chain
 import numpy as np
 import multiprocessing as mp
-from functions.utils import _inverse_pmf
+from orpb_stochastic.functions.utils import _inverse_pmf
 from copy import deepcopy
 
 # %%
