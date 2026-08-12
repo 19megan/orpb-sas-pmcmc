@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "ORPB stochastic SAS / particle MCMC work, built on mesas"
 requires-python = ">=3.9"
 dependencies = [
-    "mesas @ git+https://github.com/19megan/mesas.git@fix/copy_without_results",
+    "mesas @ git+https://github.com/JH-LandHydroLab/mesas.git@stochastic",
     "numpy",
     "pandas",
     "scipy",
