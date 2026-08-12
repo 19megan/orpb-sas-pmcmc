@@ -7,8 +7,12 @@ name = "orpb-sas-pmcmc"
 version = "0.1.0"
 description = "ORPB stochastic SAS / particle MCMC work, built on mesas"
 requires-python = ">=3.9"
+# mesas is not listed here anymore (previous dependency: "mesas @ git+https://github.com/JH-LandHydroLab/mesas.git@stochastic")
+# - install it separately first, e.g. 'conda install -c conda-forge mesas', 
+# or 'conda activate mesas-env'.
+# Building it from source via pip fails on Windows (numpy.distutils vs. 
+# modern setuptools incompatibility).
 dependencies = [
-    "mesas @ git+https://github.com/JH-LandHydroLab/mesas.git@stochastic",
     "numpy",
     "pandas",
     "scipy",
@@ -18,6 +22,8 @@ dependencies = [
     "permetrics",
     "hydroeval",
     "astropy",
+    "tqdm",
+    "seaborn",
 ]
 
 [tool.setuptools.packages.find]
