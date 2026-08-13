@@ -893,7 +893,7 @@ class ModelInterfaceMesas:
                                 * self.dt
                             )
 
-                        C_Q[n, tt, i] += C_old[n] * (1 - pQ[: t + 1, t].sum() * self.dt)
+                        C_Q[n, tt, i] += C_old[n, i] * (1 - pQ[: t + 1, t].sum() * self.dt)
 
         return C_Q
 
