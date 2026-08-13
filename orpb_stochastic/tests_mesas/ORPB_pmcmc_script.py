@@ -19,7 +19,6 @@ for mod in modules_to_clear:
         del sys.modules[mod]
 
 
-# from functions.get_dataset import get_different_input_scenarios
 import pandas as pd
 
 from ORPB_mesas_interface import ModelInterfaceMesas
@@ -65,12 +64,7 @@ if not os.path.exists(result_root):
 res = 'D' #'D'
 resolution = 'daily' #'daily'
 data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_bfill_precip 18O_{resolution}.csv", index_col=0, parse_dates=[0])
-# data_df['discharge (mm/hr)'] = data_df[f'discharge (mm/{res})'] # for convenience now
-# data_df['baseflow 1 (mm/hr)'] = data_df[f'baseflow 1 (mm/{res})']
-# data_df['snowmelt (mm/hr)'] = data_df[f'snowmelt (mm/{res})']
-# data_df['rainfall (mm/hr)'] = data_df[f'rainfall (mm/{res})']
-# data_df['ET (mm/hr)'] = data_df[f'ET (mm/{res})']
-# data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_isoMAP_{resolution}_precip 18O.csv", index_col=0, parse_dates=[0])
+
 data_df['precip 18O'] = data_df['mean_c']
 
 data_df = data_df.loc[pd.Timestamp('2015-01-01'): pd.Timestamp('2015-03-31 23:00:00')] #2014-08-01 - 2016-08-31subset to Putnam's data range
@@ -101,10 +95,6 @@ df['precip 18O'] = df['precip 18O'].bfill().ffill()
 
 
 df['is_obs_output'] = df['ORPB 18O'].notna()
-
-# sTmT = pd.read_csv(f'{data_resolution_root}/sT_mT_init_h_std.csv') #{tag}.csv')
-# df['mT_spinup'] = sTmT['mT_init'].values 
-# sT_init = sTmT['sT_init'].values
 
 case_name = 'storage_q_ug_et_u_cp'#********************
 
@@ -309,7 +299,7 @@ theta_std_df.to_csv(f"{result_root}/theta_std_{case_name}_{tag}.csv")
 np.savetxt(f"{result_root}/input_scenarios_{case_name}_{tag}.csv", input_scenarios, delimiter=",")
 np.savetxt(f"{result_root}/output_scenarios_{case_name}_{tag}.csv", output_scenarios, delimiter=",")
 
-np.save(f"{result_root}/pQ_mle_{case_name}_{tag}.npy", pQ_mle)
+np.savetxt(f"{result_root}/pQ_mle_{case_name}_{tag}.csv", pQ_mle, delimiter=",")
 np.save(f"{result_root}/sT_mle_{case_name}_{tag}.npy", sT_mle)
 np.save(f"{result_root}/ST_mle_{case_name}_{tag}.npy", ST_mle)
 
@@ -335,8 +325,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 29549979#29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = 'D3M'#'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = 'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
@@ -371,8 +361,8 @@ for i in range(len(theta_df.columns)-3):
     print(f'Posterior parameter mean = {theta_df.iloc[25:, i].mean():.3f}, std = {post_std:.3f}')
     print(f"ESS ≈ {ess:.0f} of {len(x)}, SE of mean ≈ {se:.3f}")
     print(f"SE/post_std = {se/post_std:.3f} (want << 1)") #if all seeds have <<1, convergence across seeds is solved
-    # Geweke split test: compare mean of first 10% vs last 50%
-    a, b = theta_df.iloc[:10, i], theta_df.iloc[50:, i]
+    # Geweke split test: compare mean of first 10% vs last 50% after burn-in
+    a, b = theta_df.iloc[25:35, i], theta_df.iloc[75:, i]
     z = (a.mean() - b.mean()) / np.sqrt(a.var()/len(a) + b.var()/len(b))
     print(f'Z score: {z} (should be within +-2) - stationary')
 
@@ -589,299 +579,3 @@ axes[i+1].legend(labels[0][0:2], labels[1][0:2])
 fig.tight_layout()
 plt.show()
 
-
-#%%
-# Compute KLD between prior and posterior residuals
-# =====================================================================
-# Builds two pooled residual (obs - pred) distributions and computes the
-# information-gain KLD between them: D_KL(posterior_error || prior_error).
-#
-# CAVEAT (see papers/codebase_evaluation_ORPB.md sec 3.4): output_scenarios
-# (= output_record) are DATA-CONDITIONED filtered estimates p(C_Q | y, theta),
-# whereas the saved 200 prior runs are UNCONDITIONAL forward predictions
-# p(C_Q | theta). The KLD below therefore reflects the COMBINED effect of
-# (a) parameter learning and (b) particle-filter data conditioning -- NOT pure
-# parameter information gain. For an apples-to-apples prior-vs-posterior
-# predictive KLD, regenerate the posterior side with the SAME forward machinery
-# used for the prior (ORPB_SAS_check.py) evaluated at posterior theta draws.
-from scipy.stats import gaussian_kde
-
-# --- observation series + real-obs mask (exclude backfilled points) ---
-obs_full = df['ORPB 18O'].bfill().iloc[st:et].to_numpy()
-obs_mask = df['is_obs_output'].iloc[st:et].to_numpy()          # True = real obs
-obs_vals = obs_full[obs_mask]                                  # (n_obs,)
-
-# --- PRIOR error pool: M=200 saved prior prediction time series ---
-PRIOR_RESIDUALS_PATH = f"{data_resolution_root}/residuals_{tag}.csv"  # <-- set to your file
-# file already stores (obs - pred) instead of predictions
-
-prior_raw = pd.read_csv(PRIOR_RESIDUALS_PATH).to_numpy()  # expected (M, T_full), same cols as df
-prior_sub = prior_raw[:, st:et]       # (M, n_obs) #already filtered on is_obs_output
-prior_resid = prior_sub.ravel()
-prior_resid = prior_resid[np.isfinite(prior_resid)]
-
-# --- POSTERIOR error pool: post-burn-in MCMC iterations (NOT just the last) ---
-out = np.asarray(output_scenarios)                  # (L+1, T_full); handles DataFrame or ndarray
-burn_in   = (len_parameter_MCMC + 1) // 2           # discard first half of the chain
-post_rows = np.arange(burn_in, len_parameter_MCMC + 1)
-post_pred = out[post_rows][:, st:et][:, obs_mask]   # (n_iter, n_obs)
-post_resid = (obs_vals[None, :] - post_pred).ravel()
-post_resid = post_resid[np.isfinite(post_resid)]
-
-# --- KLD estimators (direction: posterior || prior = information gain) ---
-def kl_gaussian(p, q):
-    """Closed-form KL(P||Q) for two fitted Gaussians. Headline number."""
-    mp, sp = p.mean(), p.std(ddof=1)
-    mq, sq = q.mean(), q.std(ddof=1)
-    return np.log(sq / sp) + (sp**2 + (mp - mq)**2) / (2 * sq**2) - 0.5
-
-def kl_kde(p, q, n=2000, eps=1e-12):
-    """KDE + numerical integration KL(P||Q). Robustness check for non-Gaussian residuals."""
-    lo, hi = min(p.min(), q.min()), max(p.max(), q.max())
-    pad = 0.1 * (hi - lo)
-    grid = np.linspace(lo - pad, hi + pad, n)
-    fp = gaussian_kde(p)(grid); fq = gaussian_kde(q)(grid)
-    fp /= np.trapz(fp, grid); fq /= np.trapz(fq, grid)
-    fq = np.clip(fq, eps, None)                      # guard log where posterior tail -> 0
-    integrand = np.where(fp > eps, fp * np.log(fp / fq), 0.0)
-    return np.trapz(integrand, grid)
-
-from scipy.spatial import cKDTree
-def kl_knn(p, q, k=5):
-    """k-NN KL(P||Q) estimator (Wang, Kulkarni & Verdu 2009), 1-D, in nats.
-    No binning/bandwidth -- this is the REPORTED metric (residuals are non-Gaussian)."""
-    p = np.asarray(p, float).reshape(-1, 1)
-    q = np.asarray(q, float).reshape(-1, 1)
-    n, m, d = len(p), len(q), 1
-    k = int(min(k, n - 1, m))
-    tp, tq = cKDTree(p), cKDTree(q)
-    rho = tp.query(p, k=k + 1)[0][:, k]                  # k-th NN distance within P (self excluded)
-    nu  = np.atleast_2d(tq.query(p, k=k)[0].T).T[:, -1]  # k-th NN distance to Q
-    eps = 1e-12
-    rho = np.clip(rho, eps, None); nu = np.clip(nu, eps, None)
-    return d * np.mean(np.log(nu / rho)) + np.log(m / (n - 1.0))
-
-kld_gauss = kl_gaussian(post_resid, prior_resid)
-kld_kde   = kl_kde(post_resid, prior_resid)
-kld_knn   = kl_knn(post_resid, prior_resid, k=5)        # <-- reported metric
-
-print(f"prior:     n={prior_resid.size:6d}  mean={prior_resid.mean():+.4f}  std={prior_resid.std(ddof=1):.4f}")
-print(f"posterior: n={post_resid.size:6d}  mean={post_resid.mean():+.4f}  std={post_resid.std(ddof=1):.4f}")
-print(f"D_KL(posterior || prior)  Gaussian = {kld_gauss:.4f} nats")
-print(f"D_KL(posterior || prior)  KDE      = {kld_kde:.4f} nats")
-print(f"D_KL(posterior || prior)  k-NN k=5 = {kld_knn:.4f} nats  <-- reported")
-
-# --- overlay plot ---
-plt.figure(figsize=(8, 5))
-lo = min(prior_resid.min(), post_resid.min())
-hi = max(prior_resid.max(), post_resid.max())
-bins = np.linspace(lo, hi, 80)
-plt.hist(prior_resid, bins=bins, density=True, alpha=0.45, color='grey',      label='prior error')
-plt.hist(post_resid,  bins=bins, density=True, alpha=0.45, color='steelblue', label='posterior error')
-xx = np.linspace(lo, hi, 400)
-plt.plot(xx, gaussian_kde(prior_resid)(xx), color='black', lw=1)
-plt.plot(xx, gaussian_kde(post_resid)(xx),  color='navy',  lw=1)
-plt.axvline(0, color='red', ls='--', lw=1)
-plt.xlabel('Residual  (obs - pred),  per mil')
-plt.ylabel('Density')
-plt.title(f'Error distributions   |   D_KL(post||prior) = {kld_knn:.3f} nats (k-NN)')
-plt.legend(frameon=False)
-plt.tight_layout()
-plt.show()
-
-#%%
-# FORWARD POSTERIOR-PREDICTIVE ERROR KLD  (apples-to-apples vs the prior)
-# =====================================================================
-# Unlike the cell above (which uses the FILTERED output_scenarios), this builds
-# the posterior error pool from UNCONDITIONAL FORWARD runs at posterior theta
-# draws -- the same kind of prediction as the saved 200 prior runs. This removes
-# the particle-filter "more-reweighting-steps-at-higher-resolution" confound, so
-# it is the cleaner metric for comparing data resolutions.
-#
-# Forward runs reuse the interface's own theta->model mapping
-# (model_interface.update_theta -> _init_sas_model), which handles the active
-# case (incl. *_cp) correctly. The deterministic mesas convolution runs on the
-# (filled) observed input, so the prediction depends on the SAS-shape params and
-# C_old; the sigma_* uncertainty params don't change the forward output.
-#
-# Requires the cell above to have run (defines prior_resid, obs_vals, obs_mask, ****
-# kl_gaussian, kl_kde, st, et) and a live `model_interface` (from the RUN MODEL cell).****
-
-PRED_COL = 'precip 18O --> discharge (mm/hr)'   # mesas forward-output column ('{solute} --> {flux}')
-USE_WITHIN_ITER_SPREAD = True  # False: one forward run per post-burn-in iteration mean (robust, ~rows/2 runs)
-                                # True : mixture-sample theta ~ N(mean_l, std_l), K_FWD draws total
-K_FWD = 200                     # number of mixture draws (used only if USE_WITHIN_ITER_SPREAD)
-REGENERATE_PRIOR_FORWARD = False  # True: redraw M_PRIOR prior thetas through the SAME forward_pred()
-M_PRIOR = 200                     #       machinery (fully self-consistent prior); False: reuse prior_resid
-
-theta_cols = list(theta_df.columns)             # == model_interface._theta_to_estimate order
-n_rows = len(theta_df)
-post_rows_theta = np.arange(n_rows // 2, n_rows)  # discard first half as burn-in
-
-def forward_pred(theta_vec):
-    """Deterministic mesas forward prediction of stream 18O for a theta vector."""
-    model_interface.update_theta(np.asarray(theta_vec, dtype=float))
-    return model_interface.model.data_df[PRED_COL].to_numpy()
-
-def pool_resid(theta_list, label):
-    """Forward-run each theta, return pooled (obs - pred) residuals at real-obs timesteps."""
-    out = []
-    for k, th in enumerate(theta_list):
-        pred = forward_pred(th)[st:et][obs_mask]
-        out.append(obs_vals - pred)
-        print(f"  {label} forward run {k+1}/{len(theta_list)} done", end='\r')
-    print()
-    r = np.concatenate(out)
-    return r[np.isfinite(r)]
-
-rng = np.random.default_rng(RUN_SEED)
-
-# --- assemble posterior theta draws ---
-if USE_WITHIN_ITER_SPREAD:
-    sigma_mask = np.array(['sigma' in c for c in theta_cols])     # keep these >= eps (variances)
-    post_theta = []
-    for _ in range(K_FWD):
-        l = int(rng.choice(post_rows_theta))
-        draw = rng.normal(theta_df.iloc[l].to_numpy(float), np.abs(theta_std_df.iloc[l].to_numpy(float)))
-        draw[sigma_mask] = np.clip(draw[sigma_mask], 1e-6, None)
-        post_theta.append(draw)
-else:
-    post_theta = [theta_df.iloc[l].to_numpy(float) for l in post_rows_theta]
-
-# --- posterior forward residual pool ---
-post_fwd_resid = pool_resid(post_theta, "posterior")
-
-# --- prior forward residual pool ---
-if REGENERATE_PRIOR_FORWARD:
-    # draw theta from the interface's prior distributions (same machinery as update_theta(None))
-    prior_theta = [np.array([model_interface.dist_model[k].rvs() for k in theta_cols]) for _ in range(M_PRIOR)]
-    prior_fwd_resid = pool_resid(prior_theta, "prior")
-else:
-    prior_fwd_resid = prior_resid   # reuse the saved-file forward prior from the cell above
-
-# --- KLD: forward posterior vs forward prior ---
-kld_fwd_gauss = kl_gaussian(post_fwd_resid, prior_fwd_resid)
-kld_fwd_kde   = kl_kde(post_fwd_resid, prior_fwd_resid)
-kld_fwd_knn   = kl_knn(post_fwd_resid, prior_fwd_resid, k=5)   # <-- reported metric
-print(f"prior (forward):     n={prior_fwd_resid.size:6d}  mean={prior_fwd_resid.mean():+.4f}  std={prior_fwd_resid.std(ddof=1):.4f}")
-print(f"posterior (forward): n={post_fwd_resid.size:6d}  mean={post_fwd_resid.mean():+.4f}  std={post_fwd_resid.std(ddof=1):.4f}")
-print(f"D_KL(forward posterior || forward prior)  Gaussian = {kld_fwd_gauss:.4f} nats")
-print(f"D_KL(forward posterior || forward prior)  KDE      = {kld_fwd_kde:.4f} nats")
-print(f"D_KL(forward posterior || forward prior)  k-NN k=5 = {kld_fwd_knn:.4f} nats  <-- reported")
-
-# --- overlay plot ---
-plt.figure(figsize=(8, 5))
-lo = min(prior_fwd_resid.min(), post_fwd_resid.min())
-hi = max(prior_fwd_resid.max(), post_fwd_resid.max())
-bins = np.linspace(lo, hi, 80)
-plt.hist(prior_fwd_resid, bins=bins, density=True, alpha=0.45, color='grey',     label='prior error (forward)')
-plt.hist(post_fwd_resid,  bins=bins, density=True, alpha=0.45, color='seagreen', label='posterior error (forward)')
-xx = np.linspace(lo, hi, 400)
-plt.plot(xx, gaussian_kde(prior_fwd_resid)(xx), color='black',     lw=1)
-plt.plot(xx, gaussian_kde(post_fwd_resid)(xx),  color='darkgreen', lw=1)
-plt.axvline(0, color='red', ls='--', lw=1)
-plt.xlabel('Residual  (obs - pred),  per mil')
-plt.ylabel('Density')
-plt.title(f'Forward error distributions   |   D_KL(post||prior) = {kld_fwd_knn:.3f} nats (k-NN)')
-plt.legend(frameon=False)
-plt.tight_layout()
-plt.show()
-
-#%%
-# KLD ROBUSTNESS DIAGNOSTICS: normality, KDE bandwidth sweep, k-NN estimator
-# =====================================================================
-# Cross-checks the Gaussian-vs-KDE gap. The Gaussian KLD uses only mean+variance,
-# so a large gap means the residuals are non-Gaussian. The k-NN estimator needs
-# no binning/bandwidth/grid, so if KDE and k-NN agree you can trust that number.
-# Run after the two KLD cells above (needs the residual pools, kl_gaussian, kl_knn, gaussian_kde).
-from scipy import stats
-
-def normality_report(x, name):
-    x = np.asarray(x, float); x = x[np.isfinite(x)]
-    sk, ku = stats.skew(x), stats.kurtosis(x)          # excess kurtosis (0 == normal)
-    try:
-        p = stats.normaltest(x).pvalue                 # H0: sample is normal
-    except Exception:
-        p = np.nan
-    verdict = 'NON-normal' if (np.isfinite(p) and p < 0.05) else 'consistent w/ normal'
-    print(f"  {name:22s} n={x.size:6d}  skew={sk:+.3f}  excess_kurt={ku:+.3f}  normaltest p={p:.2e}  -> {verdict}")
-
-def kl_kde_bw(p, q, bw, n=2000, eps=1e-12):
-    """KDE KL(P||Q) with an explicit gaussian_kde bw_method (for a bandwidth sweep)."""
-    lo, hi = min(p.min(), q.min()), max(p.max(), q.max())
-    pad = 0.1 * (hi - lo)
-    grid = np.linspace(lo - pad, hi + pad, n)
-    fp = gaussian_kde(p, bw_method=bw)(grid); fq = gaussian_kde(q, bw_method=bw)(grid)
-    fp /= np.trapz(fp, grid); fq /= np.trapz(fq, grid)
-    fq = np.clip(fq, eps, None)
-    integrand = np.where(fp > eps, fp * np.log(fp / fq), 0.0)
-    return np.trapz(integrand, grid)
-
-def kld_robustness(post, prior, label):
-    print(f"\n=== {label} :  D_KL(posterior || prior) ===")
-    normality_report(prior, "prior error")
-    normality_report(post,  "posterior error")
-    print(f"  Gaussian (2-moment)   = {kl_gaussian(post, prior):.4f} nats")
-    for bw in ['scott', 'silverman', 0.5, 1.0]:
-        print(f"  KDE  bw={str(bw):9s}     = {kl_kde_bw(post, prior, bw):.4f} nats")
-    for k in (3, 5, 10):
-        print(f"  k-NN k={k:<2d}             = {kl_knn(post, prior, k):.4f} nats")
-
-kld_robustness(post_resid,     prior_resid,     "FILTERED error KLD")
-kld_robustness(post_fwd_resid, prior_fwd_resid, "FORWARD error KLD")
-
-#%%
-# SAMPLER NOISE-FLOOR DIAGNOSTIC: seed-repeat posterior + particle-count effect
-# =====================================================================
-# Answers "is the 2.94-vs-3.34 prior-sensitivity gap real, or just sampler noise
-# from too few particles?". Reruns the SAME config across seeds (and a few
-# particle counts N), and reports the across-seed std of the last-iteration
-# posterior mean = the SAMPLER NOISE FLOOR. A parameter drift you see when
-# changing priors (or resolution) is only interpretable if it EXCEEDS this floor.
-# The floor should also shrink as N grows -- that is the "particles affect the
-# marginal-likelihood variance" effect, measured empirically (this sampler keeps
-# no clean log-Z, so we probe its downstream noise directly).
-#
-# WARNING: runs a full particle-Gibbs per (N, seed): cost = len(SEEDS)*len(N_VALUES)
-# full runs. Set D_DIAG / L_DIAG to your PRODUCTION values (e.g. 24 / 50); the N/D/L
-# at the top of the script are tiny placeholders that won't give a meaningful floor.
-
-N_VALUES = [15, 30]            # particle counts to compare (floor should drop as N rises)
-SEEDS    = [1, 2, 3, 4, 5]     # independent reruns per N (>=2 needed for a std)
-D_DIAG   = 24 #num_parameter_samples   # <-- set to production D (e.g. 24)
-L_DIAG   = 50 #len_parameter_MCMC      # <-- set to production L (e.g. 50)
-theta_init_diag = globals()[f"theta_{case_name}"]
-
-def run_once(N, seed):
-    """One full particle-Gibbs run; returns (param names, last-iteration posterior mean per param)."""
-    set_run_seed(seed)
-    mi = model_interface_class(
-        df=df, customized_model=SAS_Model, num_input_scenarios=N,
-        config=config, theta_init=theta_init_diag,
-    )
-    m = SSModel(model_interface=mi, num_parameter_samples=D_DIAG, len_parameter_MCMC=L_DIAG)
-    m.run_particle_Gibbs()
-    return list(mi._theta_to_estimate), m.theta_record[-1].copy()
-
-noise_floor = {}   # N -> (names, across_seed_std)
-for N in N_VALUES:
-    names, last_means = None, []
-    for s in SEEDS:
-        names, lm = run_once(N, s)
-        last_means.append(lm)
-        print(f"  N={N:>3d} seed={s} done", end='\r')
-    last_means = np.vstack(last_means)                  # (n_seeds, n_params)
-    across_seed_mean = last_means.mean(axis=0)
-    across_seed_std  = last_means.std(axis=0, ddof=1)   # the noise floor
-    noise_floor[N] = (names, across_seed_std)
-    print(f"\n=== N={N}  (over {len(SEEDS)} seeds, D={D_DIAG}, L={L_DIAG}) ===")
-    for j, nm in enumerate(names):
-        print(f"  {nm:30s} posterior mean={across_seed_mean[j]:+.5g}   seed-to-seed std (noise floor)={across_seed_std[j]:.5g}")
-
-# How to read this: for any parameter, compare the noise floor above to the drift
-# you observed when changing the prior std (e.g. ~0.40 for bf1_weight 'a').
-#   drift  >> floor  -> real prior sensitivity (weak identifiability) - interpret it
-#   drift  <~ floor  -> within sampler noise -> raise N until the floor < drift
-# And check the floor shrinks from N_VALUES[0] to N_VALUES[-1]; if it does not,
-# the limiting factor is L (chain length / convergence), not particle count.
-# %%
