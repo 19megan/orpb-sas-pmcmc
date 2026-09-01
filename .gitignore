@@ -1,5 +1,7 @@
 __pychache__/
 *.pyc
+# reference papers + codebase evaluation notes (local only, ~22MB of PDFs)
+papers/
 *.egg-info/
 .vscode/
 *.pyd
