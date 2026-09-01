@@ -12,8 +12,10 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
                  'scale': 0.254,
              },
              'prior':{ #prior for scale parameter
-                 'prior_dis': 'normal',
-                 'prior_params': [0.51, 0.249],
+                 # uninformative: flat over the plausible range instead of a normal
+                 # centred on the range midpoint. prior_params is [lower, upper].
+                 'prior_dis': 'uniform',
+                 'prior_params': [0.025, 1.0],
                  'is_nonnegative': True}
             },
          'bf1_weight':
@@ -24,11 +26,13 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
                   'scale': 2100
                   },
               'priors': { #prior for multiple params
-                    'a': {'prior_dis': 'normal', # this only works because scale is a string and uses prior dists from scale params
-                          'prior_params': [3.0, 1.02], #prior a
+                    'a': {'prior_dis': 'uniform',
+                          'prior_params': [1.0, 5.0], # [lower, upper]
                           'is_nonnegative': True},
-                    'scale': {'prior_dis': 'normal',
-                              'prior_params': [1800, 200],####CHANGE THIS**************
+                    'scale': {'prior_dis': 'uniform',
+                              # bounds are a guess -- watch for the trace piling up
+                              # against 1500 or 2200 and widen if it does
+                              'prior_params': [1500.0, 2200.0], # [lower, upper]
                               'is_nonnegative': True}
               },
               'nsegment': 200}
@@ -43,8 +47,8 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
                  'scale': 54.4, #66.502, #43.19
              },
             'prior': {
-                 'prior_dis': 'normal',
-                 'prior_params': [52.5, 24.23],
+                 'prior_dis': 'uniform',
+                 'prior_params': [5.0, 100.0], # [lower, upper]
                  'is_nonnegative': True}
             }
         }
@@ -179,10 +183,21 @@ sT_init = sTmT['sT_init'].values
 mT_init = sTmT['mT_init'].values
 
 #c_old=-7.6
-solute_parameters = {'precip 18O': {'C_old': -7.28, 'observations': 'ORPB 18O', 'mT_init': mT_init}
+solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced each iteration by the sampled value
+                                    'observations': 'ORPB 18O',
+                                    'mT_init': mT_init,
+                                    # uninformative prior spanning the observed d18O record.
+                                    # This is by far the widest of the five ranges -- expect the
+                                    # lowest ESS here, and check theta_std against 3.113
+                                    # (= range/sqrt(12)) to see whether the data constrained it.
+                                    'prior': {
+                                        'prior_dis': 'uniform',
+                                        'prior_params': [-10.78, 0.0025], # [lower, upper]
+                                        'is_nonnegative': False}
+                                    }
                      }
 
-options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'sT_init': sT_init}#, 'max_age': 2160} #8760/12 hours ~1month or up to 4380 for 6months #set max age to reduce memory errors
+options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'sT_init': sT_init, 'validate_inputs': False}#, 'max_age': 2160} #8760/12 hours ~1month or up to 4380 for 6months #set max age to reduce memory errors
 
 obs_uncertainty = {
     # sig_u
@@ -193,7 +208,7 @@ obs_uncertainty = {
     },
     'sigma filled C in': { #precip 18O':{
         'prior_dis': 'normal',
-        'prior_params': [0.08, 1.17], #[0.02, 0.02], #[-6.706, 3.293], # mean, std
+        'prior_params': [0.08, 0.97], #[0.02, 0.02], #[-6.706, 3.293], # mean, std
         'is_nonnegative': True #False
     },
     'sigma C out': { #ORPB 18O':{
