@@ -239,6 +239,13 @@ class SSModel:
                 #record values over D chains and evolution of theta distributions
                 W_theta = np.exp((WW - WW.max()) )#/WW.max()) #standard log-sum-exp, corrects weighted statistics
                 W_theta = W_theta / W_theta.sum()
+                # --- diagnostics: importance-weight health per (l, p) ---
+                # ESS <= D. With theta drawn from the prior, a low ESS means the
+                # prior range is wide relative to the likelihood peak, so the
+                # weighted mean/std below rest on only a couple of draws.
+                self.ess_record[l + 1, p] = 1.0 / np.sum(W_theta ** 2)
+                self.varll_record[l + 1, p] = np.var(WW)
+                # -------------------------------------------------------
                 theta_dist_mean = (theta_new[:,p]*W_theta).sum()
                 theta_dist_std = np.sqrt(sum((theta_new[:,p] - theta_dist_mean)**2 * W_theta)/(self.D-1.))
                 save_std[p] = theta_dist_std
