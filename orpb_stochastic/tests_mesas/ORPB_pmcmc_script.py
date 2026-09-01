@@ -260,9 +260,11 @@ model = SSModel(
     num_parameter_samples=num_parameter_samples,
     len_parameter_MCMC=len_parameter_MCMC,
 )
-
+from pytictoc import TicToc
+t = TicToc()
+t.tic()
 model.run_particle_Gibbs()
-
+t.toc()
 
 # %%
 
@@ -296,6 +298,8 @@ time = model_interface.df.index
 tag = 'h1Y'
 theta_df.to_csv(f"{result_root}/theta_{case_name}_{tag}.csv")
 theta_std_df.to_csv(f"{result_root}/theta_std_{case_name}_{tag}.csv")
+# importance-weight ESS per (iteration, parameter); row 0 is unfilled by design
+np.savetxt(f"{result_root}/ess_{case_name}_{tag}.csv", model.ess_record, delimiter=",")
 np.savetxt(f"{result_root}/input_scenarios_{case_name}_{tag}.csv", input_scenarios, delimiter=",")
 np.savetxt(f"{result_root}/output_scenarios_{case_name}_{tag}.csv", output_scenarios, delimiter=",")
 
@@ -325,8 +329,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = 'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = 'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
@@ -529,23 +533,31 @@ plt.legend(frameon=False)
 from scipy.stats import gaussian_kde
 from astropy.stats import knuth_bin_width # maximizes posterior probability of the histogram - closely related to Shannon entropy
 from scipy.stats import entropy
-prior_means = [0.51, 3.0, 1800, 52.5, -7.28, 0.08, 0.08, 0.08]
-prior_stds = [0.249, 1.02, 200, 24.23, 0.728, 0.01, 1.17, 0.01]
+# Uniform priors as [lower, upper], in the order of _theta_to_estimate. Only the
+# five SAS/C_old parameters are uniform; the three sigmas are still normal and
+# were already excluded from this plot by the -3 in the old range().
+prior_bounds = [
+    [0.025, 1.0],      # qf_weight scale
+    [1.0, 5.0],        # bf1_weight a
+    [1500.0, 2200.0],  # bf1_weight scale
+    [5.0, 100.0],      # ET scale
+    [-10.78, 0.0025],  # C_old
+]
 post_means = theta_df.iloc[25:, :].mean(axis=0)
 post_stds = theta_std_df.iloc[25:, :].mean(axis=0)
 
 ncols = 3
-nrows = int(np.ceil((len(prior_means)-3)/ncols))
+nrows = int(np.ceil(len(prior_bounds)/ncols))
 fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
 axes = axes.flatten()
 np.random.seed(1)
-for i in range(len(prior_means)-3):
-    prior_mean = prior_means[i]
-    prior_std = prior_stds[i]
+for i in range(len(prior_bounds)):
+    lo, hi = prior_bounds[i]
+    prior_mean = (lo + hi) / 2
     post_mean = post_means.iloc[i]
     post_std = post_stds.iloc[i]
-    
-    prior_hist = np.random.normal(loc=prior_mean, scale=prior_std, size=10000)
+
+    prior_hist = np.random.uniform(lo, hi, size=10000)
     post_hist = np.random.normal(loc=post_mean, scale=post_std, size=10000)
 
     P_bin_width = knuth_bin_width(prior_hist) #prior=P
@@ -568,7 +580,7 @@ for i in range(len(prior_means)-3):
     ax.set_title(f'{theta_df.columns[i]}')
     ax.set_xlabel('Value')
     ax.set_ylabel('Frequency')
-    ax.axvline(prior_mean, color='black', linestyle='--', label=f'Prior Mean = {prior_mean}')
+    ax.axvline(prior_mean, color='black', linestyle='--', label=f'Prior range = [{lo}, {hi}]')
     ax.axvline(post_mean, color='red', linestyle='--', label=f'Posterior Mean = {post_mean}')
     labels = ax.get_legend_handles_labels()
     ax.legend(labels[0][2:], labels[1][2:])
