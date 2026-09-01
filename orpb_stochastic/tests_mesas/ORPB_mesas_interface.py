@@ -50,17 +50,29 @@ class ParamsProcessor:
                 "prior" in sas_func.keys() or "prior_dis" in sas_func.keys()
             )
 
-            if has_per_param_prior:
+            # Route the parameter first, independently of how its prior is
+            # specified. C_old is an initial-state parameter, not a transit
+            # parameter, whichever of the three branches below supplies its
+            # distribution. (is_C_old used to be honoured only in the final else,
+            # so giving C_old an explicit prior sent it to transit_params and
+            # _init_sas_model then raised a KeyError on sas_specs.)
+            if is_C_old:
+                self.init_state_params.append(name)
+            else:
                 self.transit_params["to_estimate"].append(name)
+
+            if has_per_param_prior:
                 self.params["to_estimate"][name] = sas_func["priors"][param_key]
                 #don't delete priors yet
 
             elif is_prior_defined:
 
-                self.transit_params["to_estimate"].append(name)
-
                 if "prior" in sas_func.keys():
                     self.params["to_estimate"][name] = sas_func["prior"]
+                    # mesas validates both sas_specs and solute_parameters keys
+                    # strictly, so the prior has to be stripped before the dict is
+                    # handed over. Safe to mutate: sas_specs/solute_parameters are
+                    # deepcopies of the ORPB_cases dicts (see _parse_theta_init).
                     del sas_func["prior"]
                 else:
                     self.params["to_estimate"][name] = {
@@ -70,12 +82,7 @@ class ParamsProcessor:
                     }
 
             else: # set up prior with param value
-                if is_C_old:
-                    val = sas_func[param_key]
-                    self.init_state_params.append(name)
-                else:
-                    self.transit_params["to_estimate"].append(name)
-                    val = sas_func["args"][param_key]
+                val = sas_func[param_key] if is_C_old else sas_func["args"][param_key]
 
                 # # TODO: ad-hoc lognormal for input model
                 # if name ==
@@ -386,8 +393,13 @@ class ModelInterfaceMesas:
     def _parse_theta_init(
         self, theta_init: Optional[dict] = None, distinct_str: Optional[str] = "#@#"
     ) -> None:
-        self.sas_specs = theta_init["sas_specs"]
-        self.solute_parameters = theta_init["solute_parameters"]
+        # Deepcopy the two mutable blocks. Parsing strips 'prior'/'priors' keys out
+        # of them (mesas rejects unknown keys) and _init_sas_model overwrites their
+        # 'args' with each sampled theta. Without the copy we mutate the dicts
+        # imported from ORPB_cases, so rebuilding the interface in the same session
+        # sees stripped priors and last-sampled args instead of the configured ones.
+        self.sas_specs = deepcopy(theta_init["sas_specs"])
+        self.solute_parameters = deepcopy(theta_init["solute_parameters"])
         self.options = theta_init["options"]
         self.obs_uncertainty = theta_init["obs_uncertainty"]
         self.scale_parameters = None
