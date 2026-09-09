@@ -177,8 +177,11 @@ sas_specs_storage_q_g_et_u = {
 }
 
 import pandas as pd
-tag='D_std_3M' #NOTE: must change this depending on run
-sTmT = pd.read_csv(f'/Users/simon/Desktop/ORPB_resolution_datasets/sT_mT_init_{tag}.csv')
+import os
+_data_root = os.environ.get("MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets") #MESAS_DATA_ROOT is available in Rockfish slurm script, but defaults to local path if not set.
+tag = os.environ.get("ORPB_SPINUP_TAG", "D_std_3M") #ORPB_SPINUP_TAG doesn't exist yet
+#NOTE: tag must change depending on run
+sTmT = pd.read_csv(f'{_data_root}/sT_mT_init_{tag}.csv')
 sT_init = sTmT['sT_init'].values
 mT_init = sTmT['mT_init'].values
 
@@ -203,30 +206,30 @@ obs_uncertainty = {
     # sig_u
     'sigma observed C in': { #precip 18O': {
         'prior_dis': 'normal',
-        'prior_params': [0.08, 0.01], #[0.01, 0.01],#[-6.706, 3.293], # mean, std
-        'is_nonnegative': True #False # sig_u becomes the scale for normal dist so can't be neg
+        'prior_params': [0.08, 0.01], # mean, std
+        'is_nonnegative': True # sig_u becomes the scale for normal dist so can't be neg
     },
     'sigma filled C in': { #precip 18O':{
         'prior_dis': 'normal',
-        'prior_params': [0.08, 0.97], #[0.02, 0.02], #[-6.706, 3.293], # mean, std
-        'is_nonnegative': True #False
+        'prior_params': [0.08, 0.97], # mean, std
+        'is_nonnegative': True
     },
     'sigma C out': { #ORPB 18O':{
         'prior_dis': 'normal',
-        'prior_params':[0.08, 0.01], #[0.01, .01], #[5.0, 5.0], #[-7.325, 0.581], # mean, std
-        'is_nonnegative': True #False
+        'prior_params':[0.08, 0.01], # mean, std
+        'is_nonnegative': True
     }
 }                  
 
 scale_parameters = {
     'lambda':{
         'prior_dis': 'normal',
-        'prior_params': [1.005, 0.51], #[.77, .2],#[.5, .2], #[11.54, 1.5],#[0.0099, 1.5], # mean, std
+        'prior_params': [1.005, 0.51], # mean, std
         'is_nonnegative': True
     },
     'S_c':{
         'prior_dis': 'normal',
-        'prior_params': [-2011.85, 270.79], #[-295.02, 30],# [-1649.36, 10],#[-131, 10], #[-320.03, 10.0], # mean, std
+        'prior_params': [-2011.85, 270.79], # mean, std
         'is_nonnegative': False
     }
 }
