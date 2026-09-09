@@ -30,15 +30,16 @@ mkdir -p logs
 # Rockfish uses Lmod. Load anaconda then activate your env.
 module purge
 module load anaconda
-# If you built a CUDA-free env named 'mesas', activate it. Otherwise replace.
-#source activate mesas
-conda activate /home/19megan/.conda/envs/mesas_env
+
+#source activate mesas v2
+conda activate /home/19megan/.conda/envs/mesas_v2_env
 
 # Repo and data locations. EDIT THESE for your Rockfish layout.
-export MESAS_REPO_ROOT="$HOME/ORPB_19megan/mesas"
+export MESAS_REPO_ROOT="$HOME/ORPB_19megan/orpb-sas-pmcmc"
 export MESAS_DATA_ROOT="$HOME/ORPB_19megan/resolution_datasets"
 export MESAS_RESULT_ROOT="$HOME/ORPB_19megan/ORPB_results/${SLURM_JOB_ID}"
 mkdir -p "$MESAS_RESULT_ROOT"
+export ORPB_SPINUP_TAG="D_std"
 
 # Keep BLAS/OpenMP from oversubscribing inside each worker process. Each of the
 # D chains will run sequential numpy ops; one thread per worker is the safe
@@ -51,7 +52,7 @@ export NUMEXPR_NUM_THREADS=1
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-cd "$MESAS_REPO_ROOT/mesas.stochastic/tests_mesas"
+cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
 
 # Choose D <= $SLURM_CPUS_PER_TASK for full utilization. The script auto-caps
 # num_cores to SLURM_CPUS_PER_TASK so you don't need to pass --num-cores.
@@ -71,5 +72,4 @@ python -u ORPB_pmcmc_script_parallel.py \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
-# run tag for sT_mT_init_RUNTAG.py in ORPB_cases.py
-export ORPB_SPINUP_TAG="D6M"
+#NOTE: update export line ORPB_SPINUP_TAG above for run tag for sT_mT_init_RUNTAG.csv in ORPB_cases.py
