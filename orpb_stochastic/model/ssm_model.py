@@ -309,7 +309,8 @@ class SSModel:
         # of spawning Python workers each time.
         # with mp.Pool(processes=num_cores) as pool:
         from concurrent.futures import ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=num_cores) as pool: #catches OOM workers
+        ctx = mp.get_context("spawn")  # avoid fork() issues with PyTorch and CUDA
+        with ProcessPoolExecutor(max_workers=num_cores, mp_context=ctx) as pool: #catches OOM workers
             # Initial SIR pass for each of D theta candidates
             args_list = [(chains[d], theta_new[d, :]) for d in range(self.D)]
             futures = [pool.submit(worker_function_SIR, *args) for args in args_list] #for ProcessPoolExecutor
