@@ -95,11 +95,11 @@ def parse_args():
     p.add_argument("--num-mcmc", type=int, default=2,
                    help="L: length of parameter MCMC chain")
     p.add_argument("--case-name", default="storage_q_ug_et_u",
-                   choices=["storage_q_gg_et_u", "storage_q_ug_et_u",
+                   choices=["storage_q_ug_et_u_cp","storage_q_gg_et_u", "storage_q_ug_et_u",
                             "storage_q_u_et_u", "storage_q_g_et_u"])
     p.add_argument("--start-date", default="2014-01-01")
     p.add_argument("--end-date", default="2014-12-31")
-    p.add_argument("--resolution", default="hourly", choices=["hourly", "daily"])
+    p.add_argument("--resolution", default="daily", choices=["hourly", "daily", "weekly", "biweekly", "monthly"])
     p.add_argument("--data-root", default=os.environ.get(
         "MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets"))
     p.add_argument("--result-root", default=os.environ.get(
@@ -124,12 +124,12 @@ def load_data(args):
         raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
     res = res_map[args.resolution]
 
-    fname = f"ORPB_isotope_data_isoMAP_precip 18O_{args.resolution}.csv"
+    fname = f"ORPB_isotope_data_bfill_precip 18O_{args.resolution}.csv"
     data_df = pd.read_csv(os.path.join(args.data_root, fname),
                           index_col=0, parse_dates=[0])
 
     data_df["precip 18O"] = data_df["mean_c"]
-    # for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"): #only neeed for diff res datasets now all datasets are the same model resolution
+    # for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"): #only needed for diff res datasets now all datasets are the same model resolution
     #     data_df[f"{col} (mm/hr)"] = data_df[f"{col} (mm/{res})"]
 
     data_df = data_df.loc[pd.Timestamp(args.start_date): pd.Timestamp(args.end_date)]
@@ -143,7 +143,7 @@ def load_data(args):
     data_df["is_obs_input_filled"] = data_df["precip 18O"].isna()
 
     df = data_df.copy()
-    df["precip 18O"] = df["precip 18O"].ffill().bfill()
+    df["precip 18O"] = df["precip 18O"].bfill().ffill()
     df["is_obs_output"] = df["ORPB 18O"].notna()
     return df
 
@@ -160,7 +160,7 @@ def build_model_interface(args, df):
         "use_MAP_AS_weight": True,
         "use_MAP_ref_traj": True,
         "use_MAP_MCMC": True,
-        "update_theta_dist": True,
+        "update_theta_dist": False,
     }
 
     theta_lookup = {
@@ -314,7 +314,7 @@ def main():
         date_start=df.index[0],
         date_end=df.index[-1],
         resolution=res_code,
-        data_source=f"ORPB_isotope_data_isoMAP_precip 18O_{args.resolution}.csv",
+        data_source=f"ORPB_isotope_data_bfill_precip 18O_{args.resolution}.csv",
         theta_to_estimate=model_interface._theta_to_estimate,
         theta_init=theta_init,
         seed=args.seed,
