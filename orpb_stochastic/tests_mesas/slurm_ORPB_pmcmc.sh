@@ -71,4 +71,5 @@ python -u ORPB_pmcmc_script_parallel.py \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
-#NOTE: Need to manually change run tag in ORPB_cases.py since it can't be passed
+# run tag for sT_mT_init_RUNTAG.py in ORPB_cases.py
+export ORPB_SPINUP_TAG="D6M"
