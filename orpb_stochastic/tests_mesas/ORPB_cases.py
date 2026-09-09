@@ -179,8 +179,8 @@ sas_specs_storage_q_g_et_u = {
 import pandas as pd
 import os
 _data_root = os.environ.get("MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets") #MESAS_DATA_ROOT is available in Rockfish slurm script, but defaults to local path if not set.
-tag = os.environ.get("ORPB_SPINUP_TAG", "D_std_3M") #ORPB_SPINUP_TAG doesn't exist yet
-#NOTE: tag must change depending on run
+tag = os.environ.get("ORPB_SPINUP_TAG", "D_std_3M")
+#NOTE: tag must change depending on run (slurm script sets this, but running locally will need this to be changed manually)
 sTmT = pd.read_csv(f'{_data_root}/sT_mT_init_{tag}.csv')
 sT_init = sTmT['sT_init'].values
 mT_init = sTmT['mT_init'].values
