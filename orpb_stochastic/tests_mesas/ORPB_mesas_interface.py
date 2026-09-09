@@ -101,7 +101,7 @@ class ParamsProcessor:
                         val,
                         abs(val) / 10.0, # I added abs() here to make sure the scale is always positive when my value can be negative
                     ],
-                    "is_nonnegative": False,# True,  # TODO: always non-negative for now
+                    "is_nonnegative": False,
                 }
 
     def process_distribution_params(
@@ -132,7 +132,7 @@ class ParamsProcessor:
                     # self.setup_prior_params(
                     #     "not_to_estimate", flux, sas_name, "scale", sas_func
                     # )
-                    if scale_parameters: # ***why do we check this but not for kumaraswamy?*** if scale is_instance then we should always have scale_parameters
+                    if scale_parameters: # ***why do we check this but not for kumaraswamy?*** if scale is_instance then we should always have scale_parameters: only gamma dist can use scale with S_c and lambda
                         self.setup_prior_params(
                             "to_estimate",
                             flux,
@@ -440,8 +440,6 @@ class ModelInterfaceMesas:
         self._theta_init = params_processor.params
         self._transit_params = params_processor.transit_params
         self._init_state_params = params_processor.init_state_params
-
-        # print(self._theta_init, self._transit_params, self._init_state_params)
 
         self._theta_to_estimate = list(self._theta_init["to_estimate"].keys())
         self._num_theta_to_estimate = len(self._theta_to_estimate)
