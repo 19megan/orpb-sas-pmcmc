@@ -7,3 +7,6 @@ papers/
 *.pyd
 *.dll
 .DS_Store
+# editable slurm file for running ORPB PMCMC on Rockfish
+run_*.sh
+logs/
