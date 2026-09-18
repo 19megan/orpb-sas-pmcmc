@@ -281,6 +281,10 @@ class ModelInterfaceMesas:
             "use_MAP_AS_weight": False,
             "use_MAP_MCMC": False,
             "update_theta_dist": False,
+            # nominal input sampling period, in timesteps (1 = daily sampling on daily data,
+            # 7 = weekly, ...). Used to tell a composite sample from a missed one in
+            # _bulk_input_preprocess. None infers it from the median interval length.
+            "input_nominal_period": None,
         }
 
         if self.config is None:
@@ -582,8 +586,22 @@ class ModelInterfaceMesas:
         # update bulk input and sas model every time theta is updated
         self._bulk_input_preprocess()
         self._init_sas_model()
+        self._reset_input_history()
 
         return
+
+    def _reset_input_history(self) -> None:
+        """Start the particle filter's input history from the current input scenarios.
+
+        The filter's first transition starts after the first observation (init_step), so
+        transition_model never writes the inputs up to and including it -- e.g. a prepended
+        spinup -- and the convolution would read zeros there. Fill that block per particle
+        from R_prime, and reset the interval trackers so that (a) the first transition applies
+        ancestor resampling to the whole block and (b) the initial weights are evaluated
+        against the first observation rather than the last interval of the previous run.
+        """
+        self.CJ_archive[:, : self.init_step + 1, :] = self.R_prime[:, : self.init_step + 1, :]
+        self._start_ind, self._end_ind = 0, self.init_step + 1
 
     def _bulk_input_preprocess(self) -> np.ndarray:
         """Preprocess input data
@@ -598,7 +616,7 @@ class ModelInterfaceMesas:
         """
         # get the observation index
         is_input_obs = self.df["is_obs_input"].to_numpy()
-        is_filled = self.df["is_obs_input_filled"].to_numpy() # can get rid of
+        is_filled = self.df["is_obs_input_filled"].to_numpy() # no field sample; value back-filled
 
         # get the start and end index for each input interval
         ipt_observed_ind_start = np.arange(self.T)[is_input_obs == True][:-1] + 1
@@ -610,11 +628,20 @@ class ModelInterfaceMesas:
         input_forcing = self.influx.to_numpy()
 
         # get the subset of input that are not filled and are observed
-        valid_input_ind = np.logical_and(is_input_obs, ~is_filled).astype(bool)
+        valid_input_ind = np.logical_and(is_input_obs, ~is_filled).astype(bool) #includes spinup to fit ss.norm.fit
         valid_input = input_obs[valid_input_ind]
         # valid_input = valid_input[valid_input > 0]
         
         loc, scale = ss.norm.fit(valid_input)#, floc=0) # I commented out the floc=0 to allow negative mean
+
+        # An interval is "filled" only when a scheduled sample was missed. input_obs values are
+        # composites over the sampling period, so back-filled days inside a nominal-length
+        # interval are covered by that interval's own sample and carry the observed
+        # uncertainty. A missed sample at least doubles the span, so 1.5x the nominal period
+        # separates the two cases while tolerating calendar jitter (28-31 day months).
+        interval_len = ipt_observed_ind_end - ipt_observed_ind_start
+        nominal_period = self.config["input_nominal_period"] or int(np.median(interval_len))
+        is_filled_interval = interval_len > 1.5 * nominal_period
 
         # Bulk case: generate input scenarios based on observed input values
         self.R_prime = np.zeros((self.N, self.T))
@@ -632,8 +659,9 @@ class ModelInterfaceMesas:
             U_obs_p = U_obs.copy()
             U_obs_p[U_forcing == 0] = 0.0 # no observation when no rainfall
 
-            # different input uncertainty for filled and observed
-            if is_filled[i]:
+            # different input uncertainty for filled and observed (i counts intervals, not
+            # timesteps, so the old is_filled[i] was reading an unrelated day)
+            if is_filled_interval[i]:
                 sig_u = self.theta.input_model[1]
             else:
                 sig_u = self.theta.input_model[0]
@@ -800,6 +828,31 @@ class ModelInterfaceMesas:
             # TODO: ad-hoc implementation for two outflows, Q and ET
             self._sol_factors[sol_in] = self._get_sol_factor(temp_model.get_CT(sol_in))
 
+        self._precompute_convolution()
+
+    def _precompute_convolution(self) -> None:
+        """Precompute the theta-dependent pieces of the convolution in transition_model.
+
+        pQ and the solute factors only change when theta changes, so fold them together
+        once here instead of re-multiplying them inside every particle/timestep loop.
+
+        Set:
+            _conv_weights[flux][sol] (np.ndarray): [max_age, T] pQ * sol_factor * dt, zeroed where age > t
+            _P_resolved[flux] (np.ndarray): [T] fraction of the flux with age <= min(t, max_age-1)
+        """
+        self._conv_weights = {}
+        self._P_resolved = {}
+        for flux in ['discharge (mm/hr)']:
+            pQ = self._sas_funcs[flux]
+            max_age, T = pQ.shape
+            # an age can't exceed the time since the record started; anything older is C_old
+            resolvable = np.arange(max_age)[:, None] <= np.arange(T)[None, :]
+            pQ_resolvable = np.where(resolvable, pQ, 0.0)
+            self._P_resolved[flux] = pQ_resolvable.sum(axis=0) * self.dt
+            self._conv_weights[flux] = {
+                sol: pQ_resolvable * self._sol_factors[sol] * self.dt for sol in self.in_sol
+            }
+
     def _get_sol_factor(self, CT: np.ndarray) -> np.ndarray:
         """The function to get solute redistribution factor
 
@@ -814,10 +867,9 @@ class ModelInterfaceMesas:
         # Create an averaged CT
         new_CT = np.ones_like(CT)
         new_CT[0] = (CT[0] + 1.0) / 2.0
-        # Update the remaining elements
-        for i in range(1, CT.shape[0]):
-            for j in range(i, CT.shape[1]):
-                new_CT[i, j] = (CT[i - 1, j - 1] + CT[i, j]) / 2.0
+        # Update the remaining elements: new_CT[i, j] = mean(CT[i-1, j-1], CT[i, j]) for j >= i
+        diag_avg = (CT[:-1, :-1] + CT[1:, 1:]) / 2.0
+        new_CT[1:, 1:] = np.where(np.triu(np.ones(diag_avg.shape, dtype=bool)), diag_avg, 1.0)
         # Return the factor
         return new_CT[:, 1:]
 
@@ -862,9 +914,12 @@ class ModelInterfaceMesas:
         # for flux in self.model.fluxorder: #I uncommented this because I use different flux names
         for flux in ['discharge (mm/hr)']:
         # for flux in ["Q"]:  # TODO # I commented this
-            pQ = self._sas_funcs[flux]
+            P_resolved = self._P_resolved[flux]
 
             for i, sol in enumerate(self.in_sol):
+                weights = self._conv_weights[flux][sol]  # [max_age, T], see _precompute_convolution
+                max_age = weights.shape[0]
+
                 # Update CJ_archive
                 self.CJ_archive[:, self._start_ind : self._end_ind, i] = Rt[:, :, i]
 
@@ -876,34 +931,14 @@ class ModelInterfaceMesas:
                         ]
                     )
 
-                # do the convolution for each particle
-                for n in range(self.N):
-                    # get all CJs till the end of this time period for given solute
-                    C_J = self.CJ_archive[n, : self._end_ind, i]
-                    # C_J = self.R_prime[n,  : self._end_ind, i]
-
-                    # TODO: I think this can be simplified
-                    for tt in range(
-                        self._end_ind - self._start_ind
-                    ):  # for given time period
-                        # actual time is t
-                        t = tt + self._start_ind
-                        # the maximum age is t
-                        C_Q[n, tt, i] = 0
-
-                        max_age = pQ.shape[0]
-                        # for T in range(self._end_ind): # + 1):
-                        for T in range(min(self._end_ind, max_age)):
-                            # the entry time is ti
-                            ti = t - T
-                            C_Q[n, tt, i] += (
-                                C_J[ti]
-                                * pQ[T, t]
-                                * self._sol_factors[sol][T, t]
-                                * self.dt
-                            )
-
-                        C_Q[n, tt, i] += C_old[n, i] * (1 - pQ[: t + 1, t].sum() * self.dt)
+                # do the convolution for all particles at once
+                for tt in range(self._end_ind - self._start_ind):
+                    # actual time is t; resolvable ages are 0..n_age-1
+                    t = tt + self._start_ind
+                    n_age = min(t + 1, max_age)
+                    # [N, n_age]: C_J at entry times t, t-1, ..., t-n_age+1 (i.e. indexed by age)
+                    C_J = self.CJ_archive[:, t - n_age + 1 : t + 1, i][:, ::-1]
+                    C_Q[:, tt, i] = C_J @ weights[:n_age, t] + C_old[:, i] * (1.0 - P_resolved[t])
 
         return C_Q
 
