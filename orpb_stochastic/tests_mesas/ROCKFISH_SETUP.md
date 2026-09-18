@@ -30,17 +30,25 @@ A clone fixes both: one edit, one commit, and the SHA lands in every snapshot au
 ## 2. Layout on Rockfish
 
 ```
-~/ORPB_19megan/
+~/ORPB_19megan/              <- submit jobs from HERE
+├── run_ORPB_pmcmc.sh        <- YOUR editable slurm file (untracked, outside the repo)
+├── logs/                    <- SLURM .out/.err, named by job id
 ├── orpb-sas-pmcmc/          <- git clone of github.com/19megan/orpb-sas-pmcmc
 │   └── orpb_stochastic/
-│       └── tests_mesas/     <- run jobs from HERE
-├── resolution_datasets/     <- input data + sT_mT_init_*.csv  ($MESAS_DATA_ROOT)
+│       └── tests_mesas/     <- slurm_ORPB_pmcmc.sh lives here as a clean template
+├── resolution_datasets/     <- input data                     ($MESAS_DATA_ROOT)
 ├── ORPB_results/<job_id>/   <- one directory per SLURM job     ($MESAS_RESULT_ROOT)
 └── mesas_OLD/               <- retired scp'd monorepo; delete when confident
 ```
 
-Data and results live **outside** the repo. Nothing the model reads or writes is tracked by
-git, so `git pull` can never touch your data or clobber a result.
+Data, results, logs, and your editable slurm file all live **outside** the clone. Nothing
+the model reads or writes is tracked by git, so `git pull` can never touch your data,
+clobber a result, or collide with a run script.
+
+Keeping `run_ORPB_pmcmc.sh` at `~/ORPB_19megan/` rather than inside the repo works because
+the script `cd`s to `$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas` itself — nothing in it
+depends on where the script file sits. The payoff is that `git status` inside the clone
+stays completely clean, with no `.gitignore` entries needed.
 
 ---
 
@@ -66,14 +74,10 @@ package too — no reinstall needed after pulling.
 
 ### Portability changes that made one file serve both machines
 
-- **`ORPB_cases.py`** reads its spinup path and tag from the environment, falling back to
-  the local macOS paths so nothing changes on the laptop:
-  ```python
-  _data_root = os.environ.get("MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets")
-  tag        = os.environ.get("ORPB_SPINUP_TAG", "D_std_3M")
-  sTmT       = pd.read_csv(f'{_data_root}/sT_mT_init_{tag}.csv')
-  ```
-  This runs at **import** time, so a bad path here fails before anything else executes.
+- **`ORPB_pmcmc_script_parallel.py`** reads its data path from `MESAS_DATA_ROOT` (via the
+  `--data-root` default), falling back to the local macOS path so nothing changes on the
+  laptop. The spinup is not a separate file: `prepend_spinup` in `ORPB_cases.py` prepends
+  `SPINUP_YEAR` (2014) from the same dataset, so there is no spinup CSV or tag to keep in sync.
 - **`slurm_ORPB_pmcmc.sh`** loads the mesas v2 env and `cd`s to
   `$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas` (was `mesas.stochastic/tests_mesas`).
 
@@ -87,17 +91,17 @@ The `cd` is load-bearing: `tests_mesas/` has no `__init__.py`, so `ORPB_cases` a
 ```
 LAPTOP                                    ROCKFISH
 ──────                                    ────────
-edit tracked files
-git commit
-git push            ──────────────────>   git pull
-                                          edit run_<name>.sh   (untracked)
-                                          sbatch run_<name>.sh
+edit tracked files                        cd ~/ORPB_19megan/orpb-sas-pmcmc
+git commit                                git pull
+git push            ──────────────────>   cd ~/ORPB_19megan
+                                          nano run_ORPB_pmcmc.sh    (untracked)
+                                          sbatch run_ORPB_pmcmc.sh
 ```
 
 **You never edit a tracked file on Rockfish.** All code changes originate on the laptop.
 
-The one exception is deliberate: the untracked per-run slurm copy (Section 6), which exists
-precisely so you have somewhere on Rockfish to edit freely.
+The one exception is deliberate: `~/ORPB_19megan/run_ORPB_pmcmc.sh` (Section 6), which
+exists precisely so you have somewhere on Rockfish to edit freely.
 
 ### Commit is not enough — you must push
 
@@ -137,24 +141,90 @@ git show <that_sha>
 
 ---
 
-## 6. Per-run edits: the untracked copy
+## 6. Per-run edits: `run_ORPB_pmcmc.sh`
 
-Editing the tracked `slurm_ORPB_pmcmc.sh` on Rockfish will make `git pull` refuse. Instead,
-keep it as a clean template and work from a copy:
+Editing the tracked `slurm_ORPB_pmcmc.sh` on Rockfish would make `git pull` refuse. It stays
+a clean template; the working copy lives outside the repo at
+`~/ORPB_19megan/run_ORPB_pmcmc.sh`.
+
+Created once with:
+
+```bash
+mkdir -p ~/ORPB_19megan/logs
+cd ~/ORPB_19megan
+cp orpb-sas-pmcmc/orpb_stochastic/tests_mesas/slurm_ORPB_pmcmc.sh run_ORPB_pmcmc.sh
+```
+
+Thereafter, every run is: edit it, submit it, from `~/ORPB_19megan/`.
+
+```bash
+cd ~/ORPB_19megan
+nano run_ORPB_pmcmc.sh     # dates, N/D/L, --run-tag, walltime, --notes
+sbatch run_ORPB_pmcmc.sh
+```
+
+### Which changes go where
+
+| Change | Where |
+|---|---|
+| Dates, N/D/L, case, seed, run tag, notes, walltime, memory | `run_ORPB_pmcmc.sh` on Rockfish |
+| New CLI flags, env vars, path logic, conda env, anything in Python | Laptop → commit → push → `git pull` |
+
+Because there is one working copy rather than one per run, the file always reflects your
+*most recent* run, not past ones. That is fine — provenance lives in
+`ORPB_results/<job_id>/run_config_*.json`, which records N/D/L, dates, seed, priors, notes,
+and the git SHA for every job.
+
+**After a `git pull` that changed the template**, re-check your working copy: `git pull`
+updates `slurm_ORPB_pmcmc.sh` but never touches `run_ORPB_pmcmc.sh`. Diff them and hand-copy
+anything structural:
+
+```bash
+diff ~/ORPB_19megan/run_ORPB_pmcmc.sh \
+     ~/ORPB_19megan/orpb-sas-pmcmc/orpb_stochastic/tests_mesas/slurm_ORPB_pmcmc.sh
+```
+
+Expect the per-run values to differ — you are looking for new exports, changed paths, or new
+flags, not for your dates to match.
+
+### Smoke test before a long run
+
+Worth doing after any change to paths, priors, the conda env, or the mesas version — the
+failure modes there surface at import or in the first few seconds, and it is much cheaper to
+find them than to wait out a queue slot and a 2-hour job.
+
+**1. Imports, straight on the login node** (no SLURM, ~10 seconds):
 
 ```bash
 cd ~/ORPB_19megan/orpb-sas-pmcmc/orpb_stochastic/tests_mesas
-cp slurm_ORPB_pmcmc.sh run_D6M.sh     # untracked
-# edit run_D6M.sh: dates, N/D/L, run tag, walltime, notes
-sbatch run_D6M.sh
+python -c "import ORPB_cases; print('cases ok'); import ORPB_mesas_interface; print('interface ok')"
 ```
 
-Each run keeps its own script on disk, so you can see exactly how a past job was invoked.
-Structural changes (new CLI flags, env vars, path changes) still belong in the tracked
-template on the laptop, pushed and pulled like everything else.
+This catches a wrong conda env or a broken import. A bad `MESAS_DATA_ROOT` surfaces in the
+tiny job below, when the data CSV is read.
 
-> Consider adding `run_*.sh` and `logs/` to `.gitignore` so `git status` on Rockfish stays
-> clean. Not currently ignored.
+**2. A tiny job** — copy to `run_smoke.sh` and set:
+
+```
+#SBATCH --time=00:20:00
+--num-particles 3 --num-samples 3 --num-mcmc 2
+--start-date 2015-01-01 --end-date 2015-01-31
+--run-tag "_smoke"
+```
+
+```bash
+sbatch run_smoke.sh
+```
+
+This is the first thing that exercises mesas end-to-end. In particular it confirms that
+stripping the `prior` key from `solute_parameters` satisfies mesas v2's strict key
+validation at `model.py:734` — the C_old uniform-prior path (§12.2 of
+`papers/codebase_evaluation_ORPB.md`) was verified in isolation but not against a live
+mesas model.
+
+Success looks like: the job exits 0, `ORPB_results/<job_id>/` contains `theta_*.csv` and
+`ess_record_*.csv`, and `run_config_*.json` shows a real `git_commit` rather than
+`"unknown"`.
 
 ---
 
@@ -166,9 +236,8 @@ Set in the slurm script, read by the Python code. **All of them must be exported
 | Variable | Read by | Purpose |
 |---|---|---|
 | `MESAS_REPO_ROOT` | slurm script | Repo location; used for the `cd` |
-| `MESAS_DATA_ROOT` | `ORPB_cases.py`, `--data-root` default | Input CSVs and `sT_mT_init_*.csv` |
+| `MESAS_DATA_ROOT` | `--data-root` default | Input CSVs |
 | `MESAS_RESULT_ROOT` | `--result-root` default | Per-job output directory |
-| `ORPB_SPINUP_TAG` | `ORPB_cases.py` | Picks `sT_mT_init_<TAG>.csv`; defaults to `D_std_3M` |
 | `OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS` | BLAS | Set to 1 so the D worker processes don't oversubscribe cores |
 
 Per-run settings that are **CLI flags**, not env vars: `--num-particles` (N),
@@ -179,18 +248,28 @@ Per-run settings that are **CLI flags**, not env vars: `--num-particles` (N),
 
 ## 8. Gotchas
 
-**`ORPB_SPINUP_TAG` must be exported before the python call.** As of 2026-09-09 the tracked
-slurm script exports it on the last line, *after* the run, where it does nothing. The import
-then silently falls back to the `D_std_3M` default — a wrong-spinup run with no error, if
-that file happens to exist. Move it up with the other exports.
+**Every env var must be exported before the `python` line.** An export placed after it has
+no effect on the run. This once bit the now-removed `ORPB_SPINUP_TAG` (it sat on the last
+line of the script, after the run), and the failure was silent: the code fell back to a
+default. Worth re-checking whenever you add a variable.
+
+**The calibration window must start after the spinup year.** `SPINUP_YEAR = '2014'` in
+`ORPB_cases.py` is prepended to every run and excluded from the likelihood. A
+`--start-date` inside 2014 raises a `ValueError` at data load rather than duplicating data.
 
 **`logs/` must exist in the submit directory before the first `sbatch`.** SLURM opens
 `--output=logs/...` before your script runs, so the `mkdir -p logs` inside the script is too
-late on a first run. `mkdir -p logs` by hand once.
+late on a first run. Already created at `~/ORPB_19megan/logs`; only matters if you submit
+from somewhere else.
 
-**`git pull` refuses: "local changes would be overwritten".** You edited a tracked file on
-Rockfish. Either discard it (`git checkout -- <file>`) or, if you want to keep it, rename it
-to an untracked name (`mv slurm_ORPB_pmcmc.sh run_whatever.sh`) and then pull.
+**Always `sbatch` from `~/ORPB_19megan/`.** Both `--output=logs/...` and `--error=logs/...`
+are relative to the submit directory, not to where the script lives. Submitting from
+elsewhere scatters logs or fails outright.
+
+**`git pull` refuses: "local changes would be overwritten".** You edited a tracked file
+inside the clone. Either discard it (`git checkout -- <file>`) or, to keep it, move it out of
+the repo (`mv <file> ~/ORPB_19megan/`) and then pull. This should not happen with
+`run_ORPB_pmcmc.sh` living outside the clone.
 
 **Set `D <= --cpus-per-task`.** The parallel runner caps `num_cores` at
 `$SLURM_CPUS_PER_TASK` automatically, so a larger D just serializes and inflates walltime.
@@ -207,19 +286,23 @@ have salvaged anything you still need.
 ## 9. Quick reference
 
 ```bash
-# submit
-cd ~/ORPB_19megan/orpb-sas-pmcmc && git pull
-cd orpb_stochastic/tests_mesas
-sbatch run_D6M.sh
+# 1. pull whatever you pushed from the laptop, and see what you're about to run
+cd ~/ORPB_19megan/orpb-sas-pmcmc && git pull && git log -1 --oneline
 
-# monitor
+# 2. edit + submit (always from ~/ORPB_19megan)
+cd ~/ORPB_19megan
+nano run_ORPB_pmcmc.sh
+sbatch run_ORPB_pmcmc.sh
+
+# 3. monitor
 squeue -u $USER
-tail -f logs/ORPB_pmcmc_<jobid>.out
+tail -f ~/ORPB_19megan/logs/ORPB_pmcmc_<jobid>.out
 scancel <jobid>
 
-# results
+# 4. results
 ls ~/ORPB_19megan/ORPB_results/<jobid>/
+grep git_commit ~/ORPB_19megan/ORPB_results/<jobid>/run_config_*.json
 
-# bring results back (run from the laptop)
+# 5. bring results back (run from the laptop)
 scp -r <rockfish>:~/ORPB_19megan/ORPB_results/<jobid> /Users/simon/Desktop/ORPB_results/
 ```
