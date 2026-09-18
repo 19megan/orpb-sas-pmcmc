@@ -176,19 +176,51 @@ sas_specs_storage_q_g_et_u = {
 
 }
 
+import numpy as np
 import pandas as pd
-import os
-_data_root = os.environ.get("MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets") #MESAS_DATA_ROOT is available in Rockfish slurm script, but defaults to local path if not set.
-tag = os.environ.get("ORPB_SPINUP_TAG", "D_std_3M")
-#NOTE: tag must change depending on run (slurm script sets this, but running locally will need this to be changed manually)
-sTmT = pd.read_csv(f'{_data_root}/sT_mT_init_{tag}.csv')
-sT_init = sTmT['sT_init'].values
-mT_init = sTmT['mT_init'].values
+
+# Spinup: one year of forcing prepended to every run, excluded from the likelihood.
+# max_age is set to the spinup length (one year in timesteps at any resolution), so every
+# observation sees a full year of resolved input history and C_old always means "water
+# older than one year" -- comparable across runs of different lengths. Whole years matter:
+# truncating mid-season leaves a seasonal bias that C_old cannot absorb.
+SPINUP_YEAR = '2014'
+
+def prepend_spinup(data_df, start_date, end_date, spinup_year=SPINUP_YEAR, obs_col='ORPB 18O'):
+    """Return the calibration window with one year of spinup forcing prepended.
+
+    The spinup rows are the spinup_year rows of data_df, re-dated to end immediately before
+    start_date, with obs_col set to NaN so they are never evaluated in the likelihood.
+
+    Returns:
+        (pd.DataFrame, int): the combined dataframe (with a boolean 'is_spinup' column) and
+        the number of spinup timesteps, which is the max_age to use.
+    """
+    window = data_df.loc[pd.Timestamp(start_date): pd.Timestamp(end_date)]
+    spinup = data_df.loc[spinup_year].copy()
+    if window.empty:
+        raise ValueError(f"No data between {start_date} and {end_date}")
+    if window.index[0] <= spinup.index[-1]:
+        raise ValueError(f"Calibration window starting {window.index[0].date()} overlaps the "
+                         f"{spinup_year} spinup year; start after {spinup.index[-1].date()}")
+
+    # re-date so the spinup ends one timestep before the window, at the data's own frequency
+    freq = pd.infer_freq(spinup.index)
+    if freq is not None:
+        spinup.index = pd.date_range(end=window.index[0] - pd.tseries.frequencies.to_offset(freq),
+                                     periods=len(spinup), freq=freq)
+    else:  # irregular index: shift by a constant so the last spinup step sits one step before the window
+        step = spinup.index[-1] - spinup.index[-2]
+        spinup.index = spinup.index + (window.index[0] - step - spinup.index[-1])
+    spinup[obs_col] = np.nan
+    spinup['is_spinup'] = True
+
+    combined = pd.concat([spinup, window.assign(is_spinup=False)])
+    return combined, len(spinup)
 
 #c_old=-7.6
 solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced each iteration by the sampled value
                                     'observations': 'ORPB 18O',
-                                    'mT_init': mT_init,
                                     # uninformative prior spanning the observed d18O record.
                                     # This is by far the widest of the five ranges -- expect the
                                     # lowest ESS here, and check theta_std against 3.113
@@ -200,7 +232,8 @@ solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced
                                     }
                      }
 
-options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'sT_init': sT_init, 'validate_inputs': False}#, 'max_age': 2160} #8760/12 hours ~1month or up to 4380 for 6months #set max age to reduce memory errors
+options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'validate_inputs': False,
+           'max_age': None} # set at run time to the spinup length returned by prepend_spinup (None = full timeseries)
 
 obs_uncertainty = {
     # sig_u
