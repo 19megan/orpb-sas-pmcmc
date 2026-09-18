@@ -63,12 +63,14 @@ if not os.path.exists(result_root):
 #or use resolution data
 res = 'D' #'D'
 resolution = 'daily' #'daily'
-data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_bfill_precip 18O_{resolution}.csv", index_col=0, parse_dates=[0])
+data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_precip 18O_{resolution}.csv", index_col=0, parse_dates=[0])
 
 data_df['precip 18O'] = data_df['mean_c']
 
-data_df = data_df.loc[pd.Timestamp('2015-01-01'): pd.Timestamp('2015-03-31 23:00:00')] #2014-08-01 - 2016-08-31subset to Putnam's data range
-tag='D3M' #NOTE: must change this in ORPB_cases.py too
+# calibration window with SPINUP_YEAR (ORPB_cases.py) prepended; ORPB 18O is NaN in the spinup
+data_df, n_spinup = prepend_spinup(data_df, '2015-01-01', '2015-03-31 23:00:00')
+options['max_age'] = n_spinup # one year of resolved ages at every observation (shared by all theta_* cases)
+tag='D3M'
 
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
 data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum(axis=1)
@@ -318,7 +320,7 @@ save_run_config(
     N=num_input_scenarios,
     D=num_parameter_samples,
     L=len_parameter_MCMC,
-    date_start=df.index[0],
+    date_start=df.index[n_spinup], # calibration window; spinup is df.index[:n_spinup]
     date_end=df.index[-1],
     resolution=res,
     data_source=f"ORPB_isotope_data_isoMAP_precip 18O_{resolution}.csv",
