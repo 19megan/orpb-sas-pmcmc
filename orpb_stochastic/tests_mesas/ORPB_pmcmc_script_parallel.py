@@ -97,8 +97,10 @@ def parse_args():
     p.add_argument("--case-name", default="storage_q_ug_et_u",
                    choices=["storage_q_ug_et_u_cp","storage_q_gg_et_u", "storage_q_ug_et_u",
                             "storage_q_u_et_u", "storage_q_g_et_u"])
-    p.add_argument("--start-date", default="2014-01-01")
-    p.add_argument("--end-date", default="2014-12-31")
+    p.add_argument("--start-date", default="2015-01-01",
+                   help="First date of the calibration window. The SPINUP_YEAR (ORPB_cases.py) "
+                        "is prepended before it and excluded from the likelihood.")
+    p.add_argument("--end-date", default="2015-12-31")
     p.add_argument("--resolution", default="daily", choices=["hourly", "daily", "weekly", "biweekly", "monthly"])
     p.add_argument("--data-root", default=os.environ.get(
         "MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets"))
@@ -124,7 +126,7 @@ def load_data(args):
         raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
     res = res_map[args.resolution]
 
-    fname = f"ORPB_isotope_data_bfill_precip 18O_{args.resolution}.csv"
+    fname = f"ORPB_isotope_data_precip 18O_{args.resolution}.csv"
     data_df = pd.read_csv(os.path.join(args.data_root, fname),
                           index_col=0, parse_dates=[0])
 
@@ -132,7 +134,8 @@ def load_data(args):
     # for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"): #only needed for diff res datasets now all datasets are the same model resolution
     #     data_df[f"{col} (mm/hr)"] = data_df[f"{col} (mm/{res})"]
 
-    data_df = data_df.loc[pd.Timestamp(args.start_date): pd.Timestamp(args.end_date)]
+    # calibration window with one spinup year prepended (ORPB 18O set to NaN in the spinup)
+    data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date)  # noqa: F405
 
     data_df["influx (mm/hr)"] = data_df[["rainfall (mm/hr)", "snowmelt (mm/hr)"]].sum(axis=1)
     data_df["quickflow (mm/hr)"] = data_df["discharge (mm/hr)"] - data_df["baseflow 1 (mm/hr)"]
@@ -145,13 +148,13 @@ def load_data(args):
     df = data_df.copy()
     df["precip 18O"] = df["precip 18O"].bfill().ffill()
     df["is_obs_output"] = df["ORPB 18O"].notna()
-    return df
+    return df, n_spinup
 
 
 # ----------------------------------------------------------------------------
 # MODEL INITIALIZATION
 # ----------------------------------------------------------------------------
-def build_model_interface(args, df):
+def build_model_interface(args, df, n_spinup):
     config = {
         "dt": 1,
         "observed_made_each_step": df["ORPB 18O"].notna().to_list(),
@@ -174,6 +177,8 @@ def build_model_interface(args, df):
         raise ValueError(f"Case name not found: {args.case_name}")
 
     theta_init = theta_lookup[args.case_name]
+    # resolve one year of ages at every observation, identically across run lengths
+    theta_init["options"]["max_age"] = n_spinup
 
     model_interface = ModelInterfaceMesas(
         df=df,
@@ -274,8 +279,10 @@ def main():
           f"seed={args.seed}",
           flush=True)
 
-    df = load_data(args)
-    model_interface, config, theta_init = build_model_interface(args, df)
+    df, n_spinup = load_data(args)
+    model_interface, config, theta_init = build_model_interface(args, df, n_spinup)
+    print(f"[info] spinup={SPINUP_YEAR} ({n_spinup} steps, = max_age) "  # noqa: F405
+          f"calibration window={df.index[n_spinup].date()}..{df.index[-1].date()}", flush=True)
 
     model = SSModel(
         model_interface=model_interface,
@@ -303,6 +310,10 @@ def main():
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "slurm_cpus_per_task": os.environ.get("SLURM_CPUS_PER_TASK"),
         "hostname": os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME"),
+        "spinup_year": SPINUP_YEAR,  # noqa: F405
+        "spinup_steps": n_spinup,
+        "spinup_start": str(df.index[0]),
+        "max_age": theta_init["options"]["max_age"],  # mesas options are not otherwise in the snapshot
     }
     save_run_config(
         out_path=os.path.join(args.result_root, f"run_config_{tag}.json"),
@@ -311,10 +322,10 @@ def main():
         N=args.num_particles,
         D=args.num_samples,
         L=args.num_mcmc,
-        date_start=df.index[0],
+        date_start=df.index[n_spinup],  # calibration window; spinup recorded in extra
         date_end=df.index[-1],
         resolution=res_code,
-        data_source=f"ORPB_isotope_data_bfill_precip 18O_{args.resolution}.csv",
+        data_source=f"ORPB_isotope_data_precip 18O_{args.resolution}.csv",
         theta_to_estimate=model_interface._theta_to_estimate,
         theta_init=theta_init,
         seed=args.seed,
