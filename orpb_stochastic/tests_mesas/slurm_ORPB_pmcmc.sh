@@ -39,7 +39,6 @@ export MESAS_REPO_ROOT="$HOME/ORPB_19megan/orpb-sas-pmcmc"
 export MESAS_DATA_ROOT="$HOME/ORPB_19megan/resolution_datasets"
 export MESAS_RESULT_ROOT="$HOME/ORPB_19megan/ORPB_results/${SLURM_JOB_ID}"
 mkdir -p "$MESAS_RESULT_ROOT"
-export ORPB_SPINUP_TAG="D_std"
 
 # Keep BLAS/OpenMP from oversubscribing inside each worker process. Each of the
 # D chains will run sequential numpy ops; one thread per worker is the safe
@@ -68,8 +67,9 @@ python -u ORPB_pmcmc_script_parallel.py \
     --run-tag "_D6M_job${SLURM_JOB_ID}" \
     --no-plot \
     --seed 5 \
-    --notes "Testing convergence for case: W6M. Made correct prior sigma filled C in equal to 0.01 for weekly resolution. Running pMCMC with sT and mT init set from 5yr looped 2014 spinup but capped at 150 days max age using D_std version." \
+    --notes "Testing convergence for case: W6M. Made correct prior sigma filled C in equal to 0.01 for weekly resolution. Running pMCMC with the 2014 spinup year prepended to the data (max_age = 1 year)." \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
-#NOTE: update export line ORPB_SPINUP_TAG above for run tag for sT_mT_init_RUNTAG.csv in ORPB_cases.py
+#NOTE: --start-date/--end-date are the calibration window. SPINUP_YEAR in ORPB_cases.py is
+#prepended automatically and excluded from the likelihood; the window must start after it.
