@@ -260,6 +260,9 @@ class ModelInterfaceMesas:
         # initialize sas_model, given flux fixed, only need to initialize once
         self.model = None
         self.model_type = customized_model
+        # derived per-theta arrays; see __getstate__ and the cache check in update_theta
+        self._sas_funcs, self._sol_factors = None, None
+        self._conv_weights, self._P_resolved, self._sas_key = None, None, None
 
         # initialize theta
         self.update_theta()
@@ -585,10 +588,37 @@ class ModelInterfaceMesas:
 
         # update bulk input and sas model every time theta is updated
         self._bulk_input_preprocess()
-        self._init_sas_model()
+
+        # pQ and Omega depend only on the transition parameters. C_old and the three sigmas
+        # are half of the sampled parameters and leave the SAS model untouched, so rebuilding
+        # it for them re-solves mesas for nothing. Rebuild only when a transition parameter
+        # actually moved (the key is cleared on pickling, so workers always rebuild).
+        n_est = len(self._transit_params["to_estimate"])
+        sas_key = tuple(float(v) for v in transition_param[:n_est])
+        if sas_key != getattr(self, "_sas_key", None) or self._conv_weights is None:
+            self._init_sas_model()
+            self._sas_key = sas_key
+        else:
+            # keep the mesas model's C_old in step even though pQ does not depend on it
+            for i, param_key in enumerate(self._init_state_params):
+                sol_in, sol_out, _ = param_key.split(self._distinct_str)
+                if self.solute_parameters[sol_in]["observations"] == sol_out:
+                    self.solute_parameters[sol_in]["C_old"] = self.theta.initial_state[i]
+
         self._reset_input_history()
 
         return
+
+    # Workers call update_theta before doing anything, which rebuilds the SAS model, the
+    # solute factors and the convolution weights. Shipping those arrays to the worker just
+    # inflates every dispatch, so drop them (and the cache key that would skip the rebuild).
+    _DERIVED_ATTRS = ("_sas_funcs", "_sol_factors", "_conv_weights", "_P_resolved", "_sas_key")
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        for attr in self._DERIVED_ATTRS:
+            state[attr] = None
+        return state
 
     def _reset_input_history(self) -> None:
         """Start the particle filter's input history from the current input scenarios.
@@ -666,49 +696,28 @@ class ModelInterfaceMesas:
             else:
                 sig_u = self.theta.input_model[0]
 
-            for n in range(self.N):
-                # R fluctuation is based on input fluctuation
-                # R_temp = ss.norm(U_obs, scale=0.0000001).rvs()
-                R_temp = ss.norm.rvs(loc, scale, len(U_obs))
+            # All N particles at once. This is the per-particle loop vectorised: same
+            # distributions, same normalisation, one draw per interval instead of N.
+            # R fluctuation is based on input fluctuation
+            R_temp = np.random.normal(loc, scale, size=(self.N, len(U_obs)))
+            R_temp[:, U_forcing == 0] = 0.0 # zero input, so zero forcing
 
-                if isinstance(R_temp, float): #if single value, convert to array
-                    R_temp = np.array([R_temp])
+            # now generate observation uncertainty
+            R_obs = np.random.normal(U_bar, sig_u, size=self.N)
 
-                # TODO: add this to linear case
-                # re-sample if R_temp is negative
-                for r in range(len(R_temp)):
-                    if U_forcing[r] == 0: #zero input, so zero forcing
-                        R_temp[r] = 0.0
-                    # else:
-                    #     if R_temp[r] < 0: # for Cl- isotope only since it has to be positive
-                    #         R_temp[r] = 0.0
-                        # while R_temp[r] < 0:
-                        #     R_temp[r] = ss.norm(U_obs[r], sig_r).rvs()
+            # normalize_over_interval, per particle: scale the flux-weighted mean to R_obs,
+            # leaving the interval untouched where the weighted sum is zero
+            flux_sum = U_forcing.sum()
+            weighted = R_temp * U_forcing              # [N, len(U_obs)]
+            sum_val = weighted.sum(axis=1)
+            multiplier = np.where(sum_val == 0, 1.0, (R_obs * flux_sum) / np.where(sum_val == 0, 1.0, sum_val))
+            weighted = weighted * multiplier[:, None]
 
-                # now generate observation uncertainty
-                R_obs = ss.norm(U_bar, sig_u).rvs()
-                # while R_obs < 0: # I commented this to allow negative obs
-                #     R_obs = ss.norm(U_bar, sig_u).rvs()
-
-                # plt.figure()
-                # plt.plot(U_obs, "_",label="observation")
-                # plt.plot(R_temp, label="before normalization")
-                # plt.plot([0, len(R_temp)],[R_obs, R_obs], label="estiamted truth")
-
-                # R_temp = normalize_over_interval(R_temp, R_obs, U_forcing)
-
-                R_temp = ( #if you don't normalize, it will be very large
-                    normalize_over_interval(R_temp * U_forcing, R_obs * U_forcing.sum())
-                    / U_forcing
-                )
-                R_temp = np.nan_to_num(R_temp, nan=0.0)
-                # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
-                self.R_prime[n, start_ind:end_ind] = R_temp.ravel() 
-
-                # plt.plot(R_temp, label="after normalization")
-                # plt.legend()
-
-                # print(f"start_ind: {start_ind}, end_ind: {end_ind}")
+            # divide back out by the forcing; no-forcing steps stay at 0 (0/0 -> 0 before)
+            R_temp = np.divide(weighted, U_forcing,
+                               out=np.zeros_like(weighted), where=U_forcing != 0)
+            # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
+            self.R_prime[:, start_ind:end_ind] = R_temp
 
         # get dimension right
         self.R_prime = self.R_prime[:, :, np.newaxis]
@@ -777,7 +786,18 @@ class ModelInterfaceMesas:
                 self.theta.transition_model[i + len_to_estimate]
             )
 
-        temp_df = deepcopy(self.df)
+        # Omega is identically 1 (verified to 1e-14) when every flux has alpha=1 and there is
+        # no reaction term, which is the ORPB configuration: with no evapoconcentration and
+        # no decay, age-ranked concentration of a unit input stays 1. Skipping the second
+        # mesas run then saves a model copy, a dataframe deepcopy and a full solve per theta.
+        trivial_omega = all(
+            all(isinstance(a, (int, float)) and float(a) == 1.0
+                for a in params.get("alpha", {}).values())
+            and not any(k in params for k in ("k1", "C_eq"))
+            for params in self.solute_parameters.values()
+        )
+
+        temp_df = None if trivial_omega else deepcopy(self.df)
 
         # pass parameters to solute parameters
         for i in range(len(self._init_state_params)):
@@ -787,9 +807,10 @@ class ModelInterfaceMesas:
             if self.solute_parameters[sol_in]["observations"] == sol_out:
                 self.solute_parameters[sol_in]["C_old"] = self.theta.initial_state[i]
 
-            temp_df[sol_in] = 1.0
-            temp_sol_param = deepcopy(self.solute_parameters)
-            temp_sol_param[sol_in][sol_init] = 1.0
+            if not trivial_omega:
+                temp_df[sol_in] = 1.0
+                temp_sol_param = deepcopy(self.solute_parameters)
+                temp_sol_param[sol_in][sol_init] = 1.0
 
         # TODO: raise an issue for Ciaran's model
         sas_specs = deepcopy(self.sas_specs)
@@ -812,21 +833,27 @@ class ModelInterfaceMesas:
             self._sas_funcs[flux] = self.model.get_pQ(flux)
 
         # Get solute factors for each solute
-        temp_model = self.model.copy_without_results()
-        temp_model._data_df = temp_df
-        
-        #cut pre-pool deepcopy cost by stripping bulky results from self.model
-        self.model = self.model.copy_without_results()
-        # Fix: override solute_parameters in the copied model
-        for sol_in in self.conc_pairs.keys():
-            temp_model.solute_parameters[sol_in]['C_old'] = 1.0
-        temp_model.run()
+        if trivial_omega:
+            #cut pre-pool deepcopy cost by stripping bulky results from self.model
+            self.model = self.model.copy_without_results()
+            for sol_in in self.conc_pairs.keys():
+                self._sol_factors[sol_in] = 1.0   # scalar: broadcasts in _precompute_convolution
+        else:
+            temp_model = self.model.copy_without_results()
+            temp_model._data_df = temp_df
 
-        for i in range(len(self._init_state_params)):
-            param_key = self._init_state_params[i]
-            sol_in, sol_out, sol_init = param_key.split(self._distinct_str)
-            # TODO: ad-hoc implementation for two outflows, Q and ET
-            self._sol_factors[sol_in] = self._get_sol_factor(temp_model.get_CT(sol_in))
+            #cut pre-pool deepcopy cost by stripping bulky results from self.model
+            self.model = self.model.copy_without_results()
+            # Fix: override solute_parameters in the copied model
+            for sol_in in self.conc_pairs.keys():
+                temp_model.solute_parameters[sol_in]['C_old'] = 1.0
+            temp_model.run()
+
+            for i in range(len(self._init_state_params)):
+                param_key = self._init_state_params[i]
+                sol_in, sol_out, sol_init = param_key.split(self._distinct_str)
+                # TODO: ad-hoc implementation for two outflows, Q and ET
+                self._sol_factors[sol_in] = self._get_sol_factor(temp_model.get_CT(sol_in))
 
         self._precompute_convolution()
 

@@ -48,6 +48,13 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
+# Same reasoning for numba, which mesas v2 uses for the solver and which has its OWN thread
+# pool -- it is not covered by OMP_NUM_THREADS. Left at its default, every one of the D
+# worker processes starts a pool of (cores) threads, so D x cores threads fight over the
+# allocation and the idle ones busy-wait (CPU looks 95% used while nothing progresses).
+export MESAS_PARALLEL=0      # compile the solver's hot loop serially (mesas reads this at import)
+export NUMBA_NUM_THREADS=1
+
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------

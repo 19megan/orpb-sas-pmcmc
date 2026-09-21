@@ -18,6 +18,28 @@ from copy import deepcopy
 # discarded). The next iteration's AS call needs the previous run's
 # state.R/W/X/A/Y as its reference trajectory (see utils_chain.py line 138),
 # so the parent threads state[d] back into the next worker call.
+# The chain is the same object for every d apart from its theta and its filter state, and
+# update_theta rebuilds everything derived from theta. Sending it on every dispatch made the
+# parent pickle D x ~4 MB per parameter round, single-threaded, while the workers waited --
+# wall time then grew linearly with D even with cores to spare. Instead each worker process
+# receives one chain at start-up via the pool initializer and keeps it; a dispatch then
+# carries only theta and the previous State (~0.3 MB).
+_WORKER_CHAIN = None
+
+
+def _init_worker(chain):
+    global _WORKER_CHAIN
+    _WORKER_CHAIN = chain
+
+
+def worker_SIR(theta_new):
+    return worker_function_SIR(_WORKER_CHAIN, theta_new)
+
+
+def worker_AS(theta_new, prev_state):
+    return worker_function_AS(_WORKER_CHAIN, theta_new, prev_state)
+
+
 def worker_function_SIR(chain_d, theta_new):
     chain_d.model_interface.update_theta(theta_new)
     chain_d.run_particle_filter_SIR()
@@ -310,10 +332,12 @@ class SSModel:
         # with mp.Pool(processes=num_cores) as pool:
         from concurrent.futures import ProcessPoolExecutor
         ctx = mp.get_context("spawn")  # avoid fork() issues with PyTorch and CUDA
-        with ProcessPoolExecutor(max_workers=num_cores, mp_context=ctx) as pool: #catches OOM workers
+        with ProcessPoolExecutor(max_workers=num_cores, mp_context=ctx,
+                                 initializer=_init_worker,
+                                 initargs=(chains[0],)) as pool: #catches OOM workers
             # Initial SIR pass for each of D theta candidates
-            args_list = [(chains[d], theta_new[d, :]) for d in range(self.D)]
-            futures = [pool.submit(worker_function_SIR, *args) for args in args_list] #for ProcessPoolExecutor
+            args_list = [(theta_new[d, :],) for d in range(self.D)]
+            futures = [pool.submit(worker_SIR, *args) for args in args_list] #for ProcessPoolExecutor
             from concurrent.futures.process import BrokenProcessPool
             try:
                 results = [f.result() for f in futures]
@@ -358,9 +382,9 @@ class SSModel:
                 for p, key in enumerate(self._theta_to_estimate):
                     theta_new = self._update_theta_at_p(p=p, l=l, key=key)
 
-                    args_list = [(chains[d], theta_new[d, :], chain_states[d])
+                    args_list = [(theta_new[d, :], chain_states[d])
                                  for d in range(self.D)]
-                    futures = [pool.submit(worker_function_AS, *args) for args in args_list] #for ProcessPoolExecutor
+                    futures = [pool.submit(worker_AS, *args) for args in args_list] #for ProcessPoolExecutor
                     results = [f.result() for f in futures]
                     # results = pool.starmap(worker_function_AS, args_list) #for mp.Pool
                     for d in range(self.D):
