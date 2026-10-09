@@ -331,8 +331,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = 'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = 'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
@@ -535,61 +535,132 @@ plt.legend(frameon=False)
 from scipy.stats import gaussian_kde
 from astropy.stats import knuth_bin_width # maximizes posterior probability of the histogram - closely related to Shannon entropy
 from scipy.stats import entropy
-# Uniform priors as [lower, upper], in the order of _theta_to_estimate. Only the
-# five SAS/C_old parameters are uniform; the three sigmas are still normal and
-# were already excluded from this plot by the -3 in the old range().
+# Priors as [lower, upper, shape], in the order of _theta_to_estimate, where shape is
+# 'lin' for uniform and 'log' for log-uniform. The three sigmas are excluded from this
+# plot by the -3 in range() elsewhere; add them here if you want them plotted.
+# NOTE: must match the priors in ORPB_cases.py for the case being plotted.
 prior_bounds = [
-    [0.025, 1.0],      # qf_weight scale
-    [1.0, 5.0],        # bf1_weight a
-    [1500.0, 2200.0],  # bf1_weight scale
-    [5.0, 100.0],      # ET scale
-    [-10.78, 0.0025],  # C_old
+    [0.1, 200.0, 'log'],       # qf_weight scale
+    [0.1, 10.0, 'lin'],        # bf1_weight a
+    [10.0, 10000.0, 'log'],    # bf1_weight M (MEAN age-ranked storage; scale = M / a)
+    [0.1, 500.0, 'log'],       # ET scale
+    [-19.0, 2.0, 'lin'],       # C_old
 ]
-post_means = theta_df.iloc[25:, :].mean(axis=0)
-post_stds = theta_std_df.iloc[25:, :].mean(axis=0)
+# --- OLD VERSION (kept for reference) -------------------------------------------------------
+# Binning BOTH histograms over the posterior's range (Q_bins) renormalises the prior to that
+# range, which discards the narrowing KLD is meant to measure. Replaced by the block below.
+# post_means = theta_df.iloc[25:, :].mean(axis=0)
+# post_stds = theta_std_df.iloc[25:, :].mean(axis=0)
+#
+# ncols = 3
+# nrows = int(np.ceil(len(prior_bounds)/ncols))
+# fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+# axes = axes.flatten()
+# np.random.seed(1)
+# for i in range(len(prior_bounds)):
+#     lo, hi, shape = prior_bounds[i]
+#     prior_mean = np.exp((np.log(lo) + np.log(hi)) / 2) if shape == 'log' else (lo + hi) / 2
+#     post_mean = post_means.iloc[i]
+#     post_std = post_stds.iloc[i]
+#
+#     if shape == 'log':  # draw flat in log space, to match the loguniform prior
+#         prior_hist = np.exp(np.random.uniform(np.log(lo), np.log(hi), size=10000))
+#     else:
+#         prior_hist = np.random.uniform(lo, hi, size=10000)
+#     post_hist = np.random.normal(loc=post_mean, scale=post_std, size=10000)
+#
+#     P_bin_width = knuth_bin_width(prior_hist) #prior=P
+#     P_bins = np.arange(prior_hist.min(), prior_hist.max() + P_bin_width, P_bin_width)
+#     Q_bin_width = knuth_bin_width(post_hist) #posterior=Q
+#     Q_bins = np.arange(post_hist.min(), post_hist.max() + Q_bin_width, Q_bin_width)
+#
+#     counts, bin_edges = np.histogram(prior_hist, bins=Q_bins)
+#     P_probabilities = counts / counts.sum()
+#     counts, bin_edges = np.histogram(post_hist, bins=Q_bins) #has to be same bins for KLD
+#     Q_probabilities = counts / counts.sum()
+#
+#     kld_bits = entropy(Q_probabilities, P_probabilities, base=2)      # log₂ ⇒ bits
+#     kld_nats = entropy(Q_probabilities, P_probabilities)              # natural log ⇒ nats
+#     # Plot histogram
+#     ax = axes[i]
+#     ax.hist(prior_hist, bins=P_bins, density=True, color='grey', edgecolor='black', alpha=0.4, label='prior dist')
+#     ax.hist(post_hist, bins=Q_bins, density=True, color='steelblue', edgecolor='black', alpha=0.7, label='posterior dist')
+#     ax.plot(prior_mean,0, label=f'KLD = {kld_nats:.2f} nats')
+#     ax.set_title(f'{theta_df.columns[i]}')
+#     ax.set_xlabel('Value')
+#     ax.set_ylabel('Frequency')
+#     ax.axvline(prior_mean, color='black', linestyle='--', label=f'Prior range = [{lo:.2f}, {hi:.2f}]')
+#     ax.axvline(post_mean, color='red', linestyle='--', label=f'Posterior [Mean, std] = [{post_mean:.2f}, {post_std:.2f}]')
+#     labels = ax.get_legend_handles_labels()
+#     ax.legend(labels[0][2:], labels[1][2:])
+# axes[i+1].axis('off')
+# axes[i+1].legend(labels[0][0:2], labels[1][0:2])
+# # for j in range(i+1, len(axes)):
+# #     axes[j].set_visible(False)
+# fig.tight_layout()
+# plt.show()
+# --- END OLD VERSION ------------------------------------------------------------------------
 
+# Posterior draws. From a pmmh run these are the real post-burn-in samples pooled over chains
+# (pmmh_<case><tag>.npz). Otherwise fall back to the old normal(mean, std) approximation from
+# theta/theta_std csvs, which is only meaningful for runs made with Xu's original
+# weighted-mean code (before 2026-09-24).
+pmmh_file = f"{result_root}/pmmh_{case_name}_{tag}_job{job_id}.npz"
+if os.path.exists(pmmh_file):
+    _pm = np.load(pmmh_file)
+    _b = int(_pm["num_burnin"])
+    post_draws = _pm["theta_chains"][:, _b + 1:, :].reshape(-1, _pm["theta_chains"].shape[-1])
+else:
+    post_draws = None
+    post_means = theta_df.iloc[25:, :].mean(axis=0)
+    post_stds = theta_df.iloc[25:,:].std(axis=0) #theta_std should be variation in L thetas, theta_std_df is null, theta_std_df.iloc[25:, :].mean(axis=0)
+
+# KLD(posterior || prior): information gained over the prior. Binned over the PRIOR's
+# support, in log space for log-uniform priors, where the prior is flat so each bin holds
+# exactly 1/nbins of the prior mass.
+nbins = 40
 ncols = 3
 nrows = int(np.ceil(len(prior_bounds)/ncols))
 fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
 axes = axes.flatten()
 np.random.seed(1)
 for i in range(len(prior_bounds)):
-    lo, hi = prior_bounds[i]
-    prior_mean = (lo + hi) / 2
-    post_mean = post_means.iloc[i]
-    post_std = post_stds.iloc[i]
+    lo, hi, shape = prior_bounds[i]
+    prior_mean = np.exp((np.log(lo) + np.log(hi)) / 2) if shape == 'log' else (lo + hi) / 2
+    if post_draws is not None:
+        post_hist = post_draws[:, i]
+    else:
+        post_hist = np.random.normal(loc=post_means.iloc[i], scale=post_stds.iloc[i], size=10000)
+        post_hist = post_hist[(post_hist >= lo) & (post_hist <= hi)]  # prior has no mass outside
+    post_mean, post_std = post_hist.mean(), post_hist.std()
 
-    prior_hist = np.random.uniform(lo, hi, size=10000)
-    post_hist = np.random.normal(loc=post_mean, scale=post_std, size=10000)
-
-    P_bin_width = knuth_bin_width(prior_hist) #prior=P
-    P_bins = np.arange(prior_hist.min(), prior_hist.max() + P_bin_width, P_bin_width)
-    Q_bin_width = knuth_bin_width(post_hist) #posterior=Q
-    Q_bins = np.arange(post_hist.min(), post_hist.max() + Q_bin_width, Q_bin_width)
-
-    counts, bin_edges = np.histogram(prior_hist, bins=P_bins)
-    P_probabilities = counts / counts.sum()
-    counts, bin_edges = np.histogram(post_hist, bins=P_bins) #has to be same bins for KLD
+    fwd = np.log if shape == 'log' else (lambda v: v)
+    edges = np.linspace(fwd(lo), fwd(hi), nbins + 1)
+    P_probabilities = np.full(nbins, 1.0 / nbins)
+    counts, _ = np.histogram(fwd(post_hist), bins=edges)
     Q_probabilities = counts / counts.sum()
 
     kld_bits = entropy(Q_probabilities, P_probabilities, base=2)      # log₂ ⇒ bits
     kld_nats = entropy(Q_probabilities, P_probabilities)              # natural log ⇒ nats
-    # Plot histogram
+    # Plot histogram (x axis in the prior's own scale)
+    plot_bins = np.exp(edges) if shape == 'log' else edges
+    prior_hist = (np.exp(np.random.uniform(np.log(lo), np.log(hi), size=10000)) if shape == 'log'
+                  else np.random.uniform(lo, hi, size=10000))
     ax = axes[i]
-    ax.hist(prior_hist, bins=P_bins, density=True, color='grey', edgecolor='black', alpha=0.4, label='prior dist')
-    ax.hist(post_hist, bins=P_bins, density=True, color='steelblue', edgecolor='black', alpha=0.7, label='posterior dist')
-    ax.plot(prior_mean,0, label=f'KLD = {kld_nats} nats')
+    ax.hist(prior_hist, bins=plot_bins, density=True, color='grey', edgecolor='black', alpha=0.4, label='prior dist')
+    ax.hist(post_hist, bins=plot_bins, density=True, color='steelblue', edgecolor='black', alpha=0.7, label='posterior dist')
+    if shape == 'log':
+        ax.set_xscale('log')
+    ax.plot(prior_mean,0, label=f'KLD = {kld_nats:.2f} nats ({kld_bits:.2f} bits)')
     ax.set_title(f'{theta_df.columns[i]}')
     ax.set_xlabel('Value')
     ax.set_ylabel('Frequency')
-    ax.axvline(prior_mean, color='black', linestyle='--', label=f'Prior range = [{lo}, {hi}]')
-    ax.axvline(post_mean, color='red', linestyle='--', label=f'Posterior Mean = {post_mean}')
+    ax.axvline(prior_mean, color='black', linestyle='--', label=f'Prior range = [{lo:.2f}, {hi:.2f}]')
+    ax.axvline(post_mean, color='red', linestyle='--', label=f'Posterior [Mean, std] = [{post_mean:.2f}, {post_std:.2f}]')
     labels = ax.get_legend_handles_labels()
     ax.legend(labels[0][2:], labels[1][2:])
 axes[i+1].axis('off')
 axes[i+1].legend(labels[0][0:2], labels[1][0:2])
-# for j in range(i+1, len(axes)):
-#     axes[j].set_visible(False)
 fig.tight_layout()
 plt.show()
 
