@@ -12,10 +12,14 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
                  'scale': 0.254,
              },
              'prior':{ #prior for scale parameter
-                 # uninformative: flat over the plausible range instead of a normal
-                 # centred on the range midpoint. prior_params is [lower, upper].
-                 'prior_dis': 'uniform',
-                 'prior_params': [0.025, 1.0],
+                 # Uninformative over a physically plausible range, set from FORCING only
+                 # (never from the isotope observations being fitted -- that would use the
+                 # data twice). Quickflow samples event-scale storage; 200 mm is about twice
+                 # the largest daily influx on record (101 mm/d). log-uniform because this is
+                 # a positive scale spanning orders of magnitude: a linear uniform would put
+                 # most of its mass in the top decade. prior_params is [lower, upper].
+                 'prior_dis': 'loguniform',
+                 'prior_params': [0.1, 200.0],
                  'is_nonnegative': True}
             },
          'bf1_weight':
@@ -23,21 +27,31 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
               'args': {
                   'a': 3.06, #4.433, #1.26,
                   'loc': 0.0,
-                  'scale': 2100
+                  'scale': 2100  # overwritten each iteration with M / a (see 'M' prior below)
                   },
               'priors': { #prior for multiple params
                     'a': {'prior_dis': 'uniform',
-                          'prior_params': [1.0, 5.0], # [lower, upper]
+                          # shape only. a < 1 is the young-water-preference regime; the old
+                          # [1.0, 5.0] excluded it outright, which is a real assumption
+                          # (a >= 1 forces zero density at age 0, i.e. no young baseflow).
+                          'prior_params': [0.1, 10.0], # [lower, upper]
                           'is_nonnegative': True},
-                    'scale': {'prior_dis': 'uniform',
-                              # bounds are a guess -- watch for the trace piling up
-                              # against 1500 or 2200 and widen if it does
-                              'prior_params': [1500.0, 2200.0], # [lower, upper]
-                              'is_nonnegative': True}
+                    # Parameterised by the MEAN age-ranked storage M = a * scale rather than
+                    # by scale, because the physics constrains the product: bounding scale
+                    # alone cannot express it while a roams over two orders of magnitude
+                    # (a=10, scale=10000 would imply 100 m of water). The interface derives
+                    # scale = M / a. Range: saprolite tens of metres thick (St Clair et al.
+                    # 2015; Cleaves et al. 1970) at 21% specific yield (Nutter & Otton 1969)
+                    # gives 2100 mm at 10 m to 10500 mm at 50 m; tracer mixes with total
+                    # water-filled porosity (~35-45%), not just the drainable fraction, so
+                    # the upper bound is ~50 m at Sy or ~25 m at total porosity.
+                    'M': {'prior_dis': 'loguniform',
+                          'prior_params': [10.0, 10000.0], # [lower, upper], mm
+                          'is_nonnegative': True}
               },
               'nsegment': 200}
-        },        
-    'ET (mm/hr)': 
+        },
+    'ET (mm/hr)':
         {'ET (mm/hr) SAS function':
             {'func':'kumaraswamy',
              'args':{
@@ -47,8 +61,10 @@ sas_specs_storage_q_ug_et_u_cp = { #cp is for constant params (no string passed 
                  'scale': 54.4, #66.502, #43.19
              },
             'prior': {
-                 'prior_dis': 'uniform',
-                 'prior_params': [5.0, 100.0], # [lower, upper]
+                 # ET draws from rooting-zone storage; 500 mm is generous for that, and
+                 # Putnam's ~48 mm sits mid-range. log-uniform, as for the other scales.
+                 'prior_dis': 'loguniform',
+                 'prior_params': [0.1, 500.0], # [lower, upper]
                  'is_nonnegative': True}
             }
         }
@@ -221,13 +237,15 @@ def prepend_spinup(data_df, start_date, end_date, spinup_year=SPINUP_YEAR, obs_c
 #c_old=-7.6
 solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced each iteration by the sampled value
                                     'observations': 'ORPB 18O',
-                                    # uninformative prior spanning the observed d18O record.
-                                    # This is by far the widest of the five ranges -- expect the
-                                    # lowest ESS here, and check theta_std against 3.113
-                                    # (= range/sqrt(12)) to see whether the data constrained it.
+                                    # C_old is the concentration of water older than max_age,
+                                    # so it should sit near the long-term flux-weighted mean
+                                    # precipitation d18O (-6.62). Bounded by the full observed
+                                    # PRECIPITATION range [-18.92, 1.29], which is forcing, not
+                                    # the stream observations being fitted -- the previous
+                                    # [-10.78, 0.0025] looks like it came from the stream record.
                                     'prior': {
                                         'prior_dis': 'uniform',
-                                        'prior_params': [-10.78, 0.0025], # [lower, upper]
+                                        'prior_params': [-19.0, 2.0], # [lower, upper]
                                         'is_nonnegative': False}
                                     }
                      }
@@ -235,24 +253,31 @@ solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced
 options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'validate_inputs': False,
            'max_age': None} # set at run time to the spinup length returned by prepend_spinup (None = full timeseries)
 
+# All three are positive scale parameters, so they get log-uniform priors over the same
+# wide range: 0.01 permil is well below analyzer precision (0.08) and 5 permil is well above
+# any plausible structural error. Pinning them near analyzer precision is what collapsed the
+# filter -- 0.08 is the ONLY error term in the observation model, so it must also absorb
+# model structural error, and the best achievable fit is ~0.82 permil RMSE. At 0.08 the
+# filter treats an 11-sigma misfit as noise: particle ESS falls to ~2 of 25, every chain
+# degenerates equally, and the chain weights stop telling theta draws apart.
 obs_uncertainty = {
     # sig_u
     'sigma observed C in': { #precip 18O': {
-        'prior_dis': 'normal',
-        'prior_params': [0.08, 0.01], # mean, std
+        'prior_dis': 'loguniform',
+        'prior_params': [0.01, 5.0], # [lower, upper]
         'is_nonnegative': True # sig_u becomes the scale for normal dist so can't be neg
     },
     'sigma filled C in': { #precip 18O':{
-        'prior_dis': 'normal',
-        'prior_params': [0.08, 0.97], # mean, std
+        'prior_dis': 'loguniform',
+        'prior_params': [0.01, 5.0], # [lower, upper]
         'is_nonnegative': True
     },
     'sigma C out': { #ORPB 18O':{
-        'prior_dis': 'normal',
-        'prior_params':[0.08, 0.01], # mean, std
+        'prior_dis': 'loguniform',
+        'prior_params': [0.01, 5.0], # [lower, upper]
         'is_nonnegative': True
     }
-}                  
+}
 
 scale_parameters = {
     'lambda':{
