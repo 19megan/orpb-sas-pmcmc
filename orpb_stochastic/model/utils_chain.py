@@ -89,6 +89,12 @@ class Chain:
             yhk=Y[:, ind_init, :], yk=self.outflux[ind_init]
         )
 
+        # log Z_hat = sum_k [logsumexp(log w_k) - log N], the unbiased particle estimate of
+        # p(y_1:K | theta) (Andrieu, Doucet & Holenstein 2010, Eq. 9). PMMH accepts on it.
+        #W_init are log, so we normalize by dividing max (subtract in log) and then take the average
+        # and then return it to log space and multiply back the max (add in log)
+        log_Z = W_init.max() + np.log(np.mean(np.exp(W_init - W_init.max())))
+
         W_init = np.exp(W_init - W_init.max())
         W = W_init / W_init.sum()
 
@@ -117,6 +123,7 @@ class Chain:
             # print(f"y hat at {k}th step: {yk[:,-1, -1]}")
             # print(f"y at {k}th step: {self.outflux[end_ind_k - 1]}")
             # print(f"Weight at {k}th step: {w_temp}")
+            log_Z += w_temp.max() + np.log(np.mean(np.exp(w_temp - w_temp.max()))) #product over all k observations estimates p(y_1:k | theta)=Z(theta)
             w_temp = np.exp(w_temp - w_temp.max())
             W = w_temp / w_temp.sum()
             # print(f"Weight at {k}th step: {W}")
@@ -128,6 +135,7 @@ class Chain:
             A[:, k] = Ak
 
         self.state = State(X=X, A=A, W=W, R=R, Y=Y)
+        self.log_Z = float(log_Z)
 
         return
 
@@ -246,7 +254,7 @@ class Chain:
         if max:
             B[-1] = np.argmax(W)
         else:
-            B[-1] = _inverse_pmf(A[:, -1], W, num=1)
+            B[-1] = _inverse_pmf(A[:, -1], W, num=1)[0]
 
         for i in reversed(range(1, self.K)):
             B[i - 1] = A[:, i][B[i]]
