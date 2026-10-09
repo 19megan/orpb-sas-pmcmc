@@ -16,6 +16,34 @@ from math import log
 
 
 # %%
+class _LogSpaceProposal:
+    """Truncated-normal proposal in log space, for adapting a log-uniform parameter.
+
+    Adapting such a parameter in linear space would push the proposal's mass into its top
+    decade -- the same defect that makes a linear uniform a poor prior for a scale spanning
+    orders of magnitude. Sampling log(theta) instead keeps the proposal commensurate with
+    the prior. logpdf carries the -log(x) Jacobian so it is a density in the parameter's own
+    space, which is what log_prior_over_proposal needs for the log pi - log q correction.
+
+    Defined at module level (not a closure) so chains stay picklable for the worker pool.
+    """
+
+    def __init__(self, centre: float, scale: float, lower: float, upper: float) -> None:
+        self.lower, self.upper = lower, upper
+        log_lo, log_hi = np.log(lower), np.log(upper)
+        self._z = ss.truncnorm(a=(log_lo - centre) / scale, b=(log_hi - centre) / scale,
+                               loc=centre, scale=scale)
+
+    def rvs(self, size=None):
+        return np.exp(self._z.rvs(size))
+
+    def logpdf(self, x):
+        x = np.asarray(x, dtype=float)
+        safe = np.where(x > 0.0, x, 1.0)
+        out = self._z.logpdf(np.log(safe)) - np.log(safe)
+        return np.where(x > 0.0, out, -np.inf)
+
+
 # a class to store parameters
 @dataclass
 class Parameter:
@@ -185,9 +213,17 @@ class ParamsProcessor:
 
             else: # not exponential and not scale is_instance string
                 self.setup_prior_params("to_estimate", flux, sas_name, "a", sas_func)
-                self.setup_prior_params(
-                    "to_estimate", flux, sas_name, "scale", sas_func
-                )
+                # A prior on "M" (mean age-ranked storage, = a * scale) means the component
+                # is parameterised by its physical mean rather than by the gamma scale:
+                # scale = M / a is derived in _init_sas_model. Bounding scale directly cannot
+                # express the physics, because the storage the catchment holds constrains the
+                # product, and a roams over orders of magnitude independently.
+                if "priors" in sas_func and "M" in sas_func["priors"]:
+                    self.setup_prior_params("to_estimate", flux, sas_name, "M", sas_func)
+                else:
+                    self.setup_prior_params(
+                        "to_estimate", flux, sas_name, "scale", sas_func
+                    )
         if "priors" in sas_func.keys():
             del sas_func["priors"] #can delete priors only after all param priors have been set
 
@@ -288,6 +324,10 @@ class ModelInterfaceMesas:
             # 7 = weekly, ...). Used to tell a composite sample from a missed one in
             # _bulk_input_preprocess. None infers it from the median interval length.
             "input_nominal_period": None,
+            # True: every particle starts from theta's C_old, so C_old is a parameter with a
+            # posterior. False (Xu's original): each particle draws its own C_old from the prior and
+            # the C_old entry of theta has no effect on the likelihood at all.
+            "C_old_as_parameter": False,
         }
 
         if self.config is None:
@@ -490,6 +530,9 @@ class ModelInterfaceMesas:
         if not update:
             # save models
             self.dist_model = {}
+            # The proposal (dist_model) is the prior until update_theta_dist adapts it.
+            # Keep the prior itself so the weights can carry log pi - log q if it does.
+            self._prior_model = None
 
         for key in self._theta_to_estimate:
             # grab theta
@@ -504,8 +547,14 @@ class ModelInterfaceMesas:
 
                 else:
                     mean, std = theta_new[key]
-                    if std < mean / 3.0:
-                        std = mean / 3.0
+                    # abs() so the floor also fires for negative-mean parameters (C_old,
+                    # S_c); written as mean/3.0 it never did, leaving scale=0 able to reach
+                    # ss.truncnorm. Note this pins the proposal at a 33% coefficient of
+                    # variation, so a posterior cannot report itself narrower than that.
+                    # A non-finite std means the weights were degenerate (ESS=1) and carry no
+                    # width information, so the floor supplies the whole width.
+                    floor = abs(mean) / 3.0
+                    std = floor if not np.isfinite(std) else max(std, floor)
 
                 # truncate or not
                 if is_nonnegative:
@@ -516,19 +565,58 @@ class ModelInterfaceMesas:
                 else:
                     self.dist_model[key] = ss.norm(loc=mean, scale=std)
 
+            elif current_theta["prior_dis"] == "loguniform":
+                # Uninformative prior for a positive scale parameter spanning orders of
+                # magnitude: flat in log space, so [10, 10000] does not put 90% of its mass
+                # above 1000 the way a linear uniform would. prior_params is [lower, upper].
+                lower, upper = current_theta["prior_params"]
+                if lower <= 0:
+                    raise ValueError(f"loguniform prior for {key} needs a positive lower bound")
+                if not update:
+                    self.dist_model[key] = ss.loguniform(lower, upper)
+                else:
+                    # Adapt in LOG space, where this prior is flat; adapting in linear space
+                    # would drag the proposal into the top decade. Centre on the running
+                    # estimate, width from its relative spread (delta method), floored at a
+                    # twentieth of the prior's log range so the proposal cannot collapse onto
+                    # a point. Truncated to the prior's support, so log pi - log q is finite.
+                    mean, std = theta_new[key]
+                    log_lo, log_hi = np.log(lower), np.log(upper)
+                    centre = float(np.clip(np.log(max(mean, lower)), log_lo, log_hi))
+                    floor = (log_hi - log_lo) / 20.0
+                    scale = (floor if not np.isfinite(std)
+                             else max(std / max(abs(mean), 1e-12), floor))
+                    self.dist_model[key] = _LogSpaceProposal(centre, scale, lower, upper)
+
             elif current_theta["prior_dis"] == "uniform":
                 # first param: lower bound, second param: upper bound
-                # Note: uniform distribution is non-informative prior, so we don't update it
                 lower_bound = current_theta["prior_params"][0]
                 interval_length = (
                     current_theta["prior_params"][1] - current_theta["prior_params"][0]
                 )
-                self.dist_model[key] = ss.uniform(
-                    loc=lower_bound, scale=interval_length
-                )
+                if not update:
+                    self.dist_model[key] = ss.uniform(
+                        loc=lower_bound, scale=interval_length
+                    )
+                else:
+                    # Adapted proposal: normal on the running estimate, truncated to the
+                    # prior's own bounds so log pi - log q stays finite, and floored at a
+                    # twentieth of the range so it cannot collapse onto a point.
+                    mean, std = theta_new[key]
+                    floor = interval_length / 20.0
+                    scale = floor if not np.isfinite(std) else max(std, floor)
+                    upper_bound = lower_bound + interval_length
+                    mean = float(np.clip(mean, lower_bound, upper_bound))
+                    self.dist_model[key] = ss.truncnorm(
+                        a=(lower_bound - mean) / scale, b=(upper_bound - mean) / scale,
+                        loc=mean, scale=scale,
+                    )
 
             else:
                 raise ValueError("This prior distribution is not implemented yet")
+
+        if not update:
+            self._prior_model = dict(self.dist_model)
 
         return
 
@@ -620,18 +708,6 @@ class ModelInterfaceMesas:
             state[attr] = None
         return state
 
-    def _reset_input_history(self) -> None:
-        """Start the particle filter's input history from the current input scenarios.
-
-        The filter's first transition starts after the first observation (init_step), so
-        transition_model never writes the inputs up to and including it -- e.g. a prepended
-        spinup -- and the convolution would read zeros there. Fill that block per particle
-        from R_prime, and reset the interval trackers so that (a) the first transition applies
-        ancestor resampling to the whole block and (b) the initial weights are evaluated
-        against the first observation rather than the last interval of the previous run.
-        """
-        self.CJ_archive[:, : self.init_step + 1, :] = self.R_prime[:, : self.init_step + 1, :]
-        self._start_ind, self._end_ind = 0, self.init_step + 1
 
     def _bulk_input_preprocess(self) -> np.ndarray:
         """Preprocess input data
@@ -722,39 +798,6 @@ class ModelInterfaceMesas:
         # get dimension right
         self.R_prime = self.R_prime[:, :, np.newaxis]
 
-    def input_model(self, start_ind: int, end_ind: int) -> None:
-        """Input model to unpack input forcing, observation and generate input scenarios
-
-        Output R_prime is the input scenarios for C_in from start_ind to end_ind
-
-        """
-
-        R_prime = self.R_prime[:, start_ind:end_ind, :]
-
-        # record start and end ind for transition model
-        self._start_ind_p, self._end_ind_p = deepcopy(self._start_ind), deepcopy(
-            self._end_ind
-        )
-        self._start_ind, self._end_ind = start_ind, end_ind
-
-        return R_prime
-
-    def _update_df_scale(self, scale_param: dict) -> None:
-        # flux = 'Q'
-        # scale_param={}
-        # scale_param[flux]={}
-        # scale_param[flux]['lambda'] = -103.
-        # scale_param[flux]['S_c'] = 48.
-
-        for flux in scale_param.keys():
-
-            delta_S = self.df["storage (mm)"].values #dynamic storage
-            self.df["S_scale"] = scale_param[flux]["lambda"] * (
-                delta_S - scale_param[flux]["S_c"]
-            )
-            # self.sas_specs[flux][f"{flux} SAS function"]["args"]["scale"] = "S_scale"
-            self.sas_specs[flux]["bf1_weight"]["args"]["scale"] = "S_scale"
-
     def _init_sas_model(self) -> None:
         # create a new variable to storage sas model
         self._sas_funcs = {}
@@ -763,6 +806,7 @@ class ModelInterfaceMesas:
         # pass parameters to sas specs
         len_to_estimate = len(self._transit_params["to_estimate"])
         scale_param = {}
+        mean_storage = {}
         for i in range(len_to_estimate):
             param_key = self._transit_params["to_estimate"][i]
             flux, sas_name, param_name = param_key.split(self._distinct_str)
@@ -770,10 +814,19 @@ class ModelInterfaceMesas:
                 if flux not in scale_param.keys():
                     scale_param[flux] = {}
                 scale_param[flux][param_name] = self.theta.transition_model[i]
+            elif param_name == "M":
+                # mean age-ranked storage; converted to a gamma scale below, once 'a' is set
+                mean_storage[(flux, sas_name)] = self.theta.transition_model[i]
             else:
                 self.sas_specs[flux][sas_name]["args"][param_name] = (
                     self.theta.transition_model[i]
                 )
+
+        # gamma mean = a * scale, so the sampled mean storage M implies scale = M / a
+        for (flux, sas_name), M in mean_storage.items():
+            self.sas_specs[flux][sas_name]["args"]["scale"] = (
+                M / self.sas_specs[flux][sas_name]["args"]["a"]
+            )
 
         # TODO: why is this not working?
         if scale_param:
@@ -857,6 +910,42 @@ class ModelInterfaceMesas:
 
         self._precompute_convolution()
 
+    def _update_df_scale(self, scale_param: dict) -> None:
+        # flux = 'Q'
+        # scale_param={}
+        # scale_param[flux]={}
+        # scale_param[flux]['lambda'] = -103.
+        # scale_param[flux]['S_c'] = 48.
+
+        for flux in scale_param.keys():
+
+            delta_S = self.df["storage (mm)"].values #dynamic storage
+            self.df["S_scale"] = scale_param[flux]["lambda"] * (
+                delta_S - scale_param[flux]["S_c"]
+            )
+            # self.sas_specs[flux][f"{flux} SAS function"]["args"]["scale"] = "S_scale"
+            self.sas_specs[flux]["bf1_weight"]["args"]["scale"] = "S_scale"
+
+    def _get_sol_factor(self, CT: np.ndarray) -> np.ndarray:
+        """The function to get solute redistribution factor
+
+        Args:
+            CT (np.ndarray): solute conc. matrix
+
+        Returns:
+            np.ndarray: processed factor
+        """
+
+        CT = np.nan_to_num(CT, nan=1.0)
+        # Create an averaged CT
+        new_CT = np.ones_like(CT)
+        new_CT[0] = (CT[0] + 1.0) / 2.0
+        # Update the remaining elements: new_CT[i, j] = mean(CT[i-1, j-1], CT[i, j]) for j >= i
+        diag_avg = (CT[:-1, :-1] + CT[1:, 1:]) / 2.0
+        new_CT[1:, 1:] = np.where(np.triu(np.ones(diag_avg.shape, dtype=bool)), diag_avg, 1.0)
+        # Return the factor
+        return new_CT[:, 1:]
+
     def _precompute_convolution(self) -> None:
         """Precompute the theta-dependent pieces of the convolution in transition_model.
 
@@ -880,26 +969,76 @@ class ModelInterfaceMesas:
                 sol: pQ_resolvable * self._sol_factors[sol] * self.dt for sol in self.in_sol
             }
 
-    def _get_sol_factor(self, CT: np.ndarray) -> np.ndarray:
-        """The function to get solute redistribution factor
+    def _reset_input_history(self) -> None:
+        """Start the particle filter's input history from the current input scenarios.
 
-        Args:
-            CT (np.ndarray): solute conc. matrix
+        The filter's first transition starts after the first observation (init_step), so
+        transition_model never writes the inputs up to and including it -- e.g. a prepended
+        spinup -- and the convolution would read zeros there. Fill that block per particle
+        from R_prime, and reset the interval trackers so that (a) the first transition applies
+        ancestor resampling to the whole block and (b) the initial weights are evaluated
+        against the first observation rather than the last interval of the previous run.
+        """
+        self.CJ_archive[:, : self.init_step + 1, :] = self.R_prime[:, : self.init_step + 1, :]
+        self._start_ind, self._end_ind = 0, self.init_step + 1
 
-        Returns:
-            np.ndarray: processed factor
+
+    def input_model(self, start_ind: int, end_ind: int) -> None:
+        """Input model to unpack input forcing, observation and generate input scenarios
+
+        Output R_prime is the input scenarios for C_in from start_ind to end_ind
+
         """
 
-        CT = np.nan_to_num(CT, nan=1.0)
-        # Create an averaged CT
-        new_CT = np.ones_like(CT)
-        new_CT[0] = (CT[0] + 1.0) / 2.0
-        # Update the remaining elements: new_CT[i, j] = mean(CT[i-1, j-1], CT[i, j]) for j >= i
-        diag_avg = (CT[:-1, :-1] + CT[1:, 1:]) / 2.0
-        new_CT[1:, 1:] = np.where(np.triu(np.ones(diag_avg.shape, dtype=bool)), diag_avg, 1.0)
-        # Return the factor
-        return new_CT[:, 1:]
+        R_prime = self.R_prime[:, start_ind:end_ind, :]
 
+        # record start and end ind for transition model
+        self._start_ind_p, self._end_ind_p = deepcopy(self._start_ind), deepcopy(
+            self._end_ind
+        )
+        self._start_ind, self._end_ind = start_ind, end_ind
+
+        return R_prime
+
+    def trajectory_loglik(self, Y_traj: np.ndarray) -> float:
+        """Sum_k log p_g(y_tk | Y_tk) over ALL K observations, along a reference trajectory.
+
+        This is the quantity Algorithm 3 selects on (Xu 2025 p.62; Eq. 3.16, whose prod_t
+        p_f term is 1 for the deterministic MESAS convolution). It replaces
+        log(max normalised particle weight) at the final observation, which kept 1 of the K
+        terms and was bounded in [log(1/N), 0] no matter how much data there was.
+
+        Args:
+            Y_traj (np.ndarray): [T] predicted output along one particle's trajectory
+
+        Returns:
+            float: the log-likelihood of the observations under that trajectory
+        """
+        if self.y_obs is None:
+            self._find_y_obs()
+        sigma = self.theta.observation_model[0]
+        k = self.observed_ind
+        return float(np.sum(ss.norm(Y_traj[k], sigma).logpdf(self.y_obs[k])))
+
+    def log_prior_over_proposal(self) -> float:
+        """log pi(theta) - log q(theta) for the current theta; 0 while q is the prior.
+
+        Algorithm 3 draws candidates from the prior, so the selection weight is the
+        likelihood alone -- adding pi there would count the prior twice. Its alternative
+        branch ("or p(.|prod_k p_g) when prior knowledge is poor", i.e.
+        update_theta_dist=True) draws from an adapted q, and then the weight needs this
+        ratio or the estimate targets q x likelihood, which is neither prior nor posterior.
+        """
+        if self._prior_model is None or self._prior_model is self.dist_model:
+            return 0.0
+        total = 0.0
+        for key in self._theta_to_estimate:
+            value = self._theta_init["to_estimate"][key]["current_value"]
+            total += (self._prior_model[key].logpdf(value)
+                      - self.dist_model[key].logpdf(value))
+        return float(total)
+
+    
     # self.CJ_archive dimension N x T x # in sol
     def transition_model(
         self,
@@ -1040,11 +1179,11 @@ class ModelInterfaceMesas:
         else:
             yhk = yhk[:, -1, :]
 
-        theta = self.theta.observation_model
+        theta = self.theta.observation_model #sigma C out value
         if len(yhk.shape) == 1:
             return ss.norm(yhk, theta).logpdf(yk)
         else:
-            return ss.norm(yhk[:, -1], theta).logpdf(yk)
+            return ss.norm(yhk[:, -1], theta).logpdf(yk) #returns log of pdf of normal dist
 
     def initial_state_model(self, num: int) -> np.ndarray:
         """Initial state model
@@ -1057,7 +1196,10 @@ class ModelInterfaceMesas:
         """
         state = np.zeros((num, len(self._init_state_params)))
         for i, state_name in enumerate(self._init_state_params):
-            state[:, i] = self.dist_model[state_name].rvs(num)
+            if self.config["C_old_as_parameter"]:
+                state[:, i] = self.theta.initial_state[i]
+            else:
+                state[:, i] = self.dist_model[state_name].rvs(num)
 
         return state
 
