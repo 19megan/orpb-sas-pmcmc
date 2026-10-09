@@ -67,7 +67,7 @@ cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
 # --num-mcmc = steps per chain, --burnin = adaptive steps discarded (default half).
 # Each step costs about one mesas solve per chain, so wall time ~ num-mcmc x (one solve).
 # --num-particles: set per window with tune_particles.py from a short pilot run (see
-# papers/codebase_evaluation_ORPB.md 23.5). Real 3-month daily data needed N=800; 50 left
+# papers/codebase_evaluation_PMMH.md 23.5). Real 3-month daily data needed N=800; 50 left
 # the chains stuck (acceptance 1.5%). Longer windows need their own tuning.
 # --update-theta-dist is a switch: pass it to turn it on, omit it for off (it takes no value;
 # "--update-theta-dist False" is an argparse error). pmmh ignores it.
