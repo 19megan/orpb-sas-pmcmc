@@ -12,7 +12,7 @@
 #SBATCH --job-name=ORPB_pmcmc
 #SBATCH --partition=shared
 
-#SBATCH --time=2:00:00                   # walltime; bump up for longer timeseries
+#SBATCH --time=4:00:00                   # walltime; pmmh ~ num-mcmc x one mesas solve; bump for longer timeseries
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24                # match or exceed --num-samples (D) if you want it to run fast otherwise this will increase wall time
@@ -62,11 +62,22 @@ cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
 
 # Choose D <= $SLURM_CPUS_PER_TASK for full utilization. The script auto-caps
 # num_cores to SLURM_CPUS_PER_TASK so you don't need to pass --num-cores.
+#
+# --sampler pmmh (default): --num-samples = number of independent chains,
+# --num-mcmc = steps per chain, --burnin = adaptive steps discarded (default half).
+# Each step costs about one mesas solve per chain, so wall time ~ num-mcmc x (one solve).
+# --num-particles: set per window with tune_particles.py from a short pilot run (see
+# papers/codebase_evaluation_ORPB.md 23.5). Real 3-month daily data needed N=800; 50 left
+# the chains stuck (acceptance 1.5%). Longer windows need their own tuning.
+# --update-theta-dist is a switch: pass it to turn it on, omit it for off (it takes no value;
+# "--update-theta-dist False" is an argparse error). pmmh ignores it.
 python -u ORPB_pmcmc_script_parallel.py \
     --parallel \
-    --num-particles 25 \
+    --sampler pmmh \
+    --num-particles 50 \
     --num-samples 24 \
-    --num-mcmc 100 \
+    --num-mcmc 3000 \
+    --burnin 1000 \
     --case-name storage_q_ug_et_u_cp \
     --start-date 2015-01-01 \
     --end-date 2015-06-30 \
@@ -74,7 +85,7 @@ python -u ORPB_pmcmc_script_parallel.py \
     --run-tag "_D6M_job${SLURM_JOB_ID}" \
     --no-plot \
     --seed 5 \
-    --notes "Testing convergence for case: W6M. Made correct prior sigma filled C in equal to 0.01 for weekly resolution. Running pMCMC with the 2014 spinup year prepended to the data (max_age = 1 year)." \
+    --notes "PMMH, 2014 spinup prepended (max_age = 1 year)." \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
