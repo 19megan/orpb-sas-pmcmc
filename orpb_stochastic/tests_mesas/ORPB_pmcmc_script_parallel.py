@@ -114,6 +114,19 @@ def parse_args():
                    help="numpy random seed; recorded in run_config snapshot")
     p.add_argument("--notes", default="",
                    help="Additional notes for the run")
+    p.add_argument("--update-theta-dist", action="store_true",
+                   help="gibbs sampler only: adapt the proposal to the running estimate "
+                        "each iteration. Ignored by pmmh, which adapts its own proposal.")
+    p.add_argument("--sampler", default="pmmh", choices=["pmmh", "gibbs"],
+                   help="pmmh: particle marginal Metropolis-Hastings (D chains of L steps; "
+                        "posterior = post-burn-in draws). gibbs: Xu's particle Gibbs "
+                        "(Algorithm 3), kept for comparison. See "
+                        "papers/codebase_evaluation_ORPB.md and codebase_evaluation_PMMH.md.")
+    p.add_argument("--burnin", type=int, default=None,
+                   help="pmmh only: adaptive burn-in length, discarded from the posterior. "
+                        "Default L/2.")
+    p.add_argument("--traj-thin", type=int, default=10,
+                   help="pmmh only: keep the sampled output trajectory every this many steps")
     return p.parse_args()
 
 
@@ -163,7 +176,9 @@ def build_model_interface(args, df, n_spinup):
         "use_MAP_AS_weight": True,
         "use_MAP_ref_traj": True,
         "use_MAP_MCMC": True,
-        "update_theta_dist": False,
+        "update_theta_dist": args.update_theta_dist,
+        # PMMH needs C_old to be a parameter shared by all particles, or it has no posterior
+        "C_old_as_parameter": args.sampler == "pmmh",
     }
 
     theta_lookup = {
@@ -200,12 +215,16 @@ def save_results(args, model, model_interface):
     theta_name = model_interface._theta_to_estimate
     pd.DataFrame(model.theta_record, columns=theta_name).to_csv(
         os.path.join(args.result_root, f"theta_{tag}.csv"))
-    pd.DataFrame(model.theta_std, columns=theta_name).to_csv(
-        os.path.join(args.result_root, f"theta_std_{tag}.csv"))
-    pd.DataFrame(model.ess_record, columns=theta_name).to_csv(
-        os.path.join(args.result_root, f"ess_record_{tag}.csv"))
-    pd.DataFrame(model.varll_record, columns=theta_name).to_csv(
-        os.path.join(args.result_root, f"varll_record_{tag}.csv"))
+    if args.sampler != "pmmh":
+        # Weighted-candidate diagnostics of the particle-Gibbs paths. PMMH has no candidate
+        # weights, so these would be all zeros; its spread and convergence are in
+        # posterior_summary_*.csv (sd, rhat, accept) and the pmmh_*.npz chains.
+        pd.DataFrame(model.theta_std, columns=theta_name).to_csv(
+            os.path.join(args.result_root, f"theta_std_{tag}.csv"))
+        pd.DataFrame(model.ess_record, columns=theta_name).to_csv(
+            os.path.join(args.result_root, f"ess_record_{tag}.csv"))
+        pd.DataFrame(model.varll_record, columns=theta_name).to_csv(
+            os.path.join(args.result_root, f"varll_record_{tag}.csv"))
     np.savetxt(os.path.join(args.result_root, f"input_scenarios_{tag}.csv"),
                model.input_record, delimiter=",")
     np.savetxt(os.path.join(args.result_root, f"output_scenarios_{tag}.csv"),
@@ -218,7 +237,26 @@ def save_results(args, model, model_interface):
                model.sT_mle, delimiter=",")
     np.savetxt(os.path.join(args.result_root, f"ST_mle_{tag}.csv"),
                model.ST_mle, delimiter=",")
-    
+
+    if args.sampler == "pmmh":
+        # Everything needed for the posterior: all chains, all steps (burn-in included, its
+        # length stored alongside), and the output trajectories sampled with each state.
+        # For pmmh, pQ/sT/ST_mle above are at the pooled posterior MEDIAN, and theta_*.csv /
+        # output_scenarios_*.csv hold chain 0 only (kept for the old plotting code).
+        np.savez_compressed(
+            os.path.join(args.result_root, f"pmmh_{tag}.npz"),
+            theta_chains=model.theta_chains, logZ_chains=model.logZ_chains,
+            accept_chains=model.accept_chains, output_chains=model.output_chains,
+            state_chains=model.state_chains, input_chains=model.input_chains,
+            traj_iters=model.traj_iters, num_burnin=model.num_burnin,
+            prop_scale=model.prop_scale_record,
+            theta_names=np.array(model_interface._theta_to_estimate),
+            observed_ind=model_interface.observed_ind,
+            dates=model_interface.df.index.astype(str).to_numpy())
+        summary = model.pmmh_summary()
+        summary.to_csv(os.path.join(args.result_root, f"posterior_summary_{tag}.csv"))
+        print(summary.to_string(), flush=True)
+
     try:
         import dill
         session_path = os.path.join(args.result_root, f"session_{tag}.pkl")
@@ -239,6 +277,24 @@ def make_plots(args, model, model_interface):
     st = model_interface.observed_ind[0]
     et = model_interface.observed_ind[-1]
     time = df.index
+    if args.sampler == "pmmh":
+        # one figure: the trajectories sampled with every post-burn-in state, all chains
+        keep = model.traj_iters > model.num_burnin
+        trajs = model.output_chains[:, keep, st:et + 1].reshape(-1, et + 1 - st)
+        lo, mid, hi = np.percentile(trajs, [5, 50, 95], axis=0)
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.fill_between(time[st:et + 1], lo, hi, color="orange", alpha=0.3,
+                        label="posterior 5-95%")
+        ax.plot(time[st:et + 1], mid, color="orange", label="posterior median")
+        obs = df["ORPB 18O"].iloc[st:et + 1]
+        ax.plot(time[st:et + 1][obs.notna()], obs.dropna(), "k.", label="observed")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("delta 18O in stream (per mil)")
+        ax.legend(frameon=False)
+        fig.tight_layout()
+        fig.savefig(os.path.join(args.result_root, f"output_{tag}_posterior.pdf"))
+        plt.close(fig)
+        return
     for i in range(args.num_mcmc + 1):
         fig, ax = plt.subplots(figsize=(12, 4))
         ax.step(time[st:et], df["ORPB 18O"].backfill().iloc[st:et], label="observed")
@@ -290,7 +346,10 @@ def main():
         len_parameter_MCMC=args.num_mcmc,
     )
 
-    if args.parallel:
+    if args.sampler == "pmmh":
+        model.run_pmmh(num_burnin=args.burnin, num_cores=args.num_cores,
+                       parallel=args.parallel, traj_thin=args.traj_thin)
+    elif args.parallel:
         model.run_particle_Gibbs_parallel(num_cores=args.num_cores)
     else:
         model.run_particle_Gibbs()
@@ -305,6 +364,8 @@ def main():
         raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
     res_code = res_map[args.resolution]
     extra = {
+        "sampler": args.sampler,
+        "burnin": getattr(model, "num_burnin", None),
         "parallel": args.parallel,
         "num_cores": args.num_cores,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
