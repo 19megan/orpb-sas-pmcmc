@@ -44,10 +44,13 @@ export NUMBA_NUM_THREADS=1
 # ---------------------------------------------------------------------------
 # Pilot run to tune from. EDIT THESE for each window.
 # ---------------------------------------------------------------------------
+# PILOT_JOB is the PILOT run's SLURM job ID (not this job's: SLURM_JOB_ID here is the tuning
+# job itself). PILOT_TAG is the --run-tag the pilot was run with.
 # slurm_ORPB_pmcmc.sh writes results to ORPB_results/<job ID>/pmmh_<case><run-tag>.npz.
 CASE_NAME="storage_q_ug_et_u_cp"
-PILOT_TAG="_D6M_job${SLURM_JOB_ID}"
-PILOT="$HOME/ORPB_19megan/ORPB_results/${SLURM_JOB_ID}/pmmh_${CASE_NAME}${PILOT_TAG}.npz"
+PILOT_JOB="00000000"
+PILOT_TAG="_D6M_job${PILOT_JOB}"
+PILOT="$HOME/ORPB_19megan/ORPB_results/${PILOT_JOB}/pmmh_${CASE_NAME}${PILOT_TAG}.npz"
 
 if [ ! -f "$PILOT" ]; then
     echo "pilot file not found: $PILOT" >&2
