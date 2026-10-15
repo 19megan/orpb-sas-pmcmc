@@ -71,6 +71,7 @@ cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
 # the chains stuck (acceptance 1.5%). Longer windows need their own tuning.
 # --update-theta-dist is a switch: pass it to turn it on, omit it for off (it takes no value;
 # "--update-theta-dist False" is an argparse error). pmmh ignores it.
+# --init_from is optional; if passed, it loads the last state of a previous pilot run to continue sampling.
 python -u ORPB_pmcmc_script_parallel.py \
     --parallel \
     --sampler pmmh \
@@ -78,6 +79,7 @@ python -u ORPB_pmcmc_script_parallel.py \
     --num-samples 24 \
     --num-mcmc 3000 \
     --burnin 1000 \
+    --init_from "$HOME/ORPB_19megan/ORPB_results/<pilot_jobid>/pmmh_storage_q_ut__et_u_cp_D6M_job<pilot_jobid>.npz" \
     --case-name storage_q_ug_et_u_cp \
     --start-date 2015-01-01 \
     --end-date 2015-06-30 \

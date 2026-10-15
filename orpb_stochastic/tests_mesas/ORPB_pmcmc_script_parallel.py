@@ -127,12 +127,41 @@ def parse_args():
                         "Default L/2.")
     p.add_argument("--traj-thin", type=int, default=10,
                    help="pmmh only: keep the sampled output trajectory every this many steps")
+    p.add_argument("--init-from", default=None,
+                   help="pmmh only: warm start. Path to a pmmh_*.npz from a cold-started pilot "
+                        "of the SAME window, case and resolution; each chain starts from one of "
+                        "its post-burn-in states. Omit for a cold start from the priors.")
     return p.parse_args()
 
 
 # ----------------------------------------------------------------------------
 # DATA LOADING (mirrors the original script)
 # ----------------------------------------------------------------------------
+def load_init_theta(path, theta_names, D, max_logZ_gap=10.0):
+    """D warm-start states from a pilot's pmmh_*.npz, one post-burn-in draw per pilot chain in
+    turn, so every pilot chain (including any sitting in a second mode) is represented.
+
+    Pilot chains that never reached the posterior are skipped: those whose median log Z_hat is
+    more than max_logZ_gap below the median over chains. A genuine second mode fits about as
+    well as the main one and is kept; a stuck chain fits far worse."""
+    pm = np.load(path)
+    names = [str(n) for n in pm["theta_names"]]
+    if names != list(theta_names):
+        raise ValueError("--init-from run estimated different parameters than this case:\n"
+                         f"  file: {names}\n  case: {list(theta_names)}")
+    b = int(pm["num_burnin"])
+    draws = pm["theta_chains"][:, b + 1:, :]          # [pilot chains, steps, p]
+    chain_logZ = np.median(pm["logZ_chains"][:, b + 1:], axis=1)
+    keep = np.flatnonzero(chain_logZ >= np.median(chain_logZ) - max_logZ_gap)
+    skipped = np.setdiff1d(np.arange(len(chain_logZ)), keep)
+    if skipped.size:
+        print(f"[info] warm start skips pilot chains {skipped.tolist()} (median log Z "
+              f"{np.round(chain_logZ[skipped], 1).tolist()} vs median "
+              f"{np.median(chain_logZ):.1f})", flush=True)
+    return np.array([draws[keep[d % len(keep)], np.random.randint(draws.shape[1])]
+                     for d in range(D)])
+
+
 def load_data(args):
     res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "ME"}
     if args.resolution not in res_map:
@@ -347,8 +376,14 @@ def main():
     )
 
     if args.sampler == "pmmh":
+        init_theta = None
+        if args.init_from:
+            init_theta = load_init_theta(args.init_from, model_interface._theta_to_estimate,
+                                         args.num_samples)
+            print(f"[info] warm start from {args.init_from}", flush=True)
         model.run_pmmh(num_burnin=args.burnin, num_cores=args.num_cores,
-                       parallel=args.parallel, traj_thin=args.traj_thin)
+                       parallel=args.parallel, traj_thin=args.traj_thin,
+                       init_theta=init_theta)
     elif args.parallel:
         model.run_particle_Gibbs_parallel(num_cores=args.num_cores)
     else:
@@ -366,6 +401,7 @@ def main():
     extra = {
         "sampler": args.sampler,
         "burnin": getattr(model, "num_burnin", None),
+        "init_from": args.init_from,
         "parallel": args.parallel,
         "num_cores": args.num_cores,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),

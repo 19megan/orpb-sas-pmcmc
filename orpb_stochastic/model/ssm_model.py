@@ -352,7 +352,8 @@ class SSModel:
 
     def run_pmmh(self, num_burnin: Optional[int] = None, num_cores: Optional[int] = None,
                  parallel: bool = False, traj_thin: int = 10,
-                 target_accept: float = 0.2) -> None:
+                 target_accept: float = 0.2,
+                 init_theta: Optional[np.ndarray] = None) -> None:
         """Particle marginal Metropolis-Hastings, D independent chains of L+1 states each.
 
         Each chain proposes theta' by a random walk, runs a fresh SIR filter at theta' to get
@@ -368,6 +369,12 @@ class SSModel:
         and log scales need no special cases. During burn-in the proposal covariance adapts
         to the pooled chain history (Haario et al. 2001) and its size to target_accept; it is
         frozen afterwards, so post-burn-in draws come from a fixed, valid MH kernel.
+
+        init_theta [D, p] (optional): warm start. Each chain starts from one of these states,
+        normally post-burn-in draws from a cold-started pilot of the same window, and the first
+        proposal covariance is their spread. Starting points do not change the target, only
+        how long chains take to reach it. Chains started from one run will tend to miss any
+        mode that run missed, so draw the states from all of its chains.
 
         Results:
             theta_chains [D, L+1, p]   every state, burn-in included; posterior = post-burn-in
@@ -414,8 +421,15 @@ class SSModel:
             return [_pmmh_evaluate(chains[d], th) for d, th in enumerate(thetas)]
 
         try:
-            # initial states: one prior draw per chain, so chains start overdispersed
-            z = np.random.standard_normal((D, p)) # z(theta) is the marginal likelihood of the data given the parameters: p(y_1:k | theta)
+            if init_theta is not None:
+                # warm start: begin each chain at a given state (e.g. a pilot's posterior draws)
+                init_theta = np.asarray(init_theta, dtype=float)
+                if init_theta.shape != (D, p):
+                    raise ValueError(f"init_theta must have shape {(D, p)}, got {init_theta.shape}")
+                z = np.array([self._to_z(init_theta[d]) for d in range(D)])
+            else:
+                # initial states: one prior draw per chain, so chains start overdispersed
+                z = np.random.standard_normal((D, p)) # z(theta) is prior whitened coordinates of theta (each prior becomes N(0,1))
             theta = np.array([self._to_theta(z[d]) for d in range(D)])
             results = evaluate(theta)
             logZ = np.array([r[0] for r in results])
@@ -423,6 +437,10 @@ class SSModel:
 
             # proposal: log_scale^2 * cov; cov starts at a small isotropic step
             cov = np.eye(p) * 0.1 ** 2 #shape of step i.e. how far to move in each parameter
+            if init_theta is not None:
+                # warm-start states are posterior draws, so their spread is a first estimate
+                # of the posterior's shape (needs D > p for a full-rank covariance)
+                cov = np.cov(z, rowvar=False) + 1e-6 * np.eye(p)
             log_scale = np.log(2.38 / np.sqrt(p)) #overall size of step (standard optimal scaling for random-walk Metropolis. Stored as log so changes act multiplicatively)
             accepted_since = np.zeros(D)
 
