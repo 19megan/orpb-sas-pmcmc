@@ -254,7 +254,7 @@ options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1
            'max_age': None} # set at run time to the spinup length returned by prepend_spinup (None = full timeseries)
 
 # All three are positive scale parameters, so they get log-uniform priors over the same
-# wide range: 0.01 permil is well below analyzer precision (0.08) and 5 permil is well above
+# wide range: 0.08 permil is analyzer precision (0.08) and 3.5 permil is std of precip 18O -
 # any plausible structural error. Pinning them near analyzer precision is what collapsed the
 # filter -- 0.08 is the ONLY error term in the observation model, so it must also absorb
 # model structural error, and the best achievable fit is ~0.82 permil RMSE. At 0.08 the
@@ -264,17 +264,17 @@ obs_uncertainty = {
     # sig_u
     'sigma observed C in': { #precip 18O': {
         'prior_dis': 'loguniform',
-        'prior_params': [0.01, 5.0], # [lower, upper]
+        'prior_params': [0.08, 3.5], # [lower, upper]
         'is_nonnegative': True # sig_u becomes the scale for normal dist so can't be neg
     },
     'sigma filled C in': { #precip 18O':{
         'prior_dis': 'loguniform',
-        'prior_params': [0.01, 5.0], # [lower, upper]
+        'prior_params': [0.08, 8.5], # [lower, upper]
         'is_nonnegative': True
     },
     'sigma C out': { #ORPB 18O':{
         'prior_dis': 'loguniform',
-        'prior_params': [0.01, 5.0], # [lower, upper]
+        'prior_params': [0.08, 3.5], # [lower, upper]
         'is_nonnegative': True
     }
 }
