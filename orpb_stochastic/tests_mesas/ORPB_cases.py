@@ -269,7 +269,7 @@ obs_uncertainty = {
     },
     'sigma filled C in': { #precip 18O':{
         'prior_dis': 'loguniform',
-        'prior_params': [0.08, 8.5], # [lower, upper]
+        'prior_params': [0.08, 3.5], # [lower, upper]
         'is_nonnegative': True
     },
     'sigma C out': { #ORPB 18O':{
