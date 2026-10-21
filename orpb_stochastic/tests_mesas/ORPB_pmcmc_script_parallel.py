@@ -184,7 +184,7 @@ def load_data(args):
 
     df = data_df.copy()
     df["precip 18O"] = df["precip 18O"].bfill().ffill()
-    data_df["is_obs_input"] = data_df["precip 18O"].notna()
+    df["is_obs_input"] = df["precip 18O"].notna()
     df["is_obs_output"] = df["ORPB 18O"].notna()
     return df, n_spinup
 
