@@ -79,23 +79,14 @@ data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum
 data_df['quickflow (mm/hr)'] = data_df['discharge (mm/hr)'] - data_df['baseflow 1 (mm/hr)']
 data_df['bf1_weight'] = data_df['baseflow 1 (mm/hr)'] / data_df['discharge (mm/hr)']
 data_df['qf_weight'] = data_df['quickflow (mm/hr)'] / data_df['discharge (mm/hr)']
-# isbaseflow = data_df.loc[(data_df['quickflow (mm/hr)']<0.001) & issample].index
-# isquickflow = data_df.loc[(data_df['quickflow (mm/hr)']>=0.001) & issample].index
 
-# data_df['weekly_obs'] = ~data_df.loc[data_df['rainfall (mm/hr)']>0, 'Sample Name'].duplicated(keep='last') # make sure weekly values are only for when rain was actually observed (1066 obs values vs only 235 when observed without rain restriction)
-# data_df['weekly_obs'] = data_df['weekly_obs'].fillna(False) #set non-masked values to False i.e. where no rain observed
-# data_df.loc[data_df['weekly_obs']==False, 'precip 18O'] = np.nan # set non-weekly observed isotope values to nan so they don't influence GP fit
-
-data_df['is_obs_input'] = data_df['precip 18O'].notna()
-data_df['is_obs_input_filled'] = False
-data_df.loc[data_df['precip 18O'].isna()==True, 'is_obs_input_filled']=True
 # fill nans in precip 18O with mean
 mean = data_df['precip 18O'].mean()
 df= data_df.copy() #make a copy of the data_df
 # df.loc[df['precip 18O'].isna()==True, 'precip 18O']=mean
 df['precip 18O'] = df['precip 18O'].bfill().ffill()
 
-
+data_df['is_obs_input'] = data_df['precip 18O'].notna()
 df['is_obs_output'] = df['ORPB 18O'].notna()
 
 case_name = 'storage_q_ug_et_u_cp'#********************

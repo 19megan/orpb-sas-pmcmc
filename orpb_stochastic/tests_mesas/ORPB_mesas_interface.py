@@ -228,7 +228,7 @@ class ParamsProcessor:
             del sas_func["priors"] #can delete priors only after all param priors have been set
 
     def set_obs_uncertainty(self, obs_uncertainty):
-        for key, values in obs_uncertainty.items(): # e.g. key='sigma observed C in', values={'prior_dis': 'normal', 'prior_params': [0.05, 0.02], 'is_nonnegative': True}
+        for key, values in obs_uncertainty.items(): # e.g. key='sigma C in', values={'prior_dis': 'loguniform', 'prior_params': [0.08, 3.5], 'is_nonnegative': True}
             self.params["to_estimate"][key] = values
 
 
@@ -320,10 +320,6 @@ class ModelInterfaceMesas:
             "use_MAP_AS_weight": False,
             "use_MAP_MCMC": False,
             "update_theta_dist": False,
-            # nominal input sampling period, in timesteps (1 = daily sampling on daily data,
-            # 7 = weekly, ...). Used to tell a composite sample from a missed one in
-            # _bulk_input_preprocess. None infers it from the median interval length.
-            "input_nominal_period": None,
             # True: every particle starts from theta's C_old, so C_old is a parameter with a
             # posterior. False (Xu's original): each particle draws its own C_old from the prior and
             # the C_old entry of theta has no effect on the likelihood at all.
@@ -655,8 +651,7 @@ class ModelInterfaceMesas:
 
         # input uncertainty param is to estimate
         input_param = [
-            self._theta_init["to_estimate"]["sigma observed C in"]["current_value"],
-            self._theta_init["to_estimate"]["sigma filled C in"]["current_value"],
+            self._theta_init["to_estimate"]["sigma C in"]["current_value"],
         ]
 
         # initial state param is to estimate
@@ -722,7 +717,6 @@ class ModelInterfaceMesas:
         """
         # get the observation index
         is_input_obs = self.df["is_obs_input"].to_numpy()
-        is_filled = self.df["is_obs_input_filled"].to_numpy() # no field sample; value back-filled
 
         # get the start and end index for each input interval
         ipt_observed_ind_start = np.arange(self.T)[is_input_obs == True][:-1] + 1
@@ -733,21 +727,11 @@ class ModelInterfaceMesas:
         input_obs = self.df[self.in_sol].to_numpy()
         input_forcing = self.influx.to_numpy()
 
-        # get the subset of input that are not filled and are observed
-        valid_input_ind = np.logical_and(is_input_obs, ~is_filled).astype(bool) #includes spinup to fit ss.norm.fit
-        valid_input = input_obs[valid_input_ind]
+        # the observed samples (includes the spinup year, to fit ss.norm.fit)
+        valid_input = input_obs[is_input_obs.astype(bool)]
         # valid_input = valid_input[valid_input > 0]
         
         loc, scale = ss.norm.fit(valid_input)#, floc=0) # I commented out the floc=0 to allow negative mean
-
-        # An interval is "filled" only when a scheduled sample was missed. input_obs values are
-        # composites over the sampling period, so back-filled days inside a nominal-length
-        # interval are covered by that interval's own sample and carry the observed
-        # uncertainty. A missed sample at least doubles the span, so 1.5x the nominal period
-        # separates the two cases while tolerating calendar jitter (28-31 day months).
-        interval_len = ipt_observed_ind_end - ipt_observed_ind_start
-        nominal_period = self.config["input_nominal_period"] or int(np.median(interval_len))
-        is_filled_interval = interval_len > 1.5 * nominal_period
 
         # Bulk case: generate input scenarios based on observed input values
         self.R_prime = np.zeros((self.N, self.T))
@@ -765,12 +749,8 @@ class ModelInterfaceMesas:
             U_obs_p = U_obs.copy()
             U_obs_p[U_forcing == 0] = 0.0 # no observation when no rainfall
 
-            # different input uncertainty for filled and observed (i counts intervals, not
-            # timesteps, so the old is_filled[i] was reading an unrelated day)
-            if is_filled_interval[i]:
-                sig_u = self.theta.input_model[1]
-            else:
-                sig_u = self.theta.input_model[0]
+            # one input uncertainty for every sample: each is the composite for its interval
+            sig_u = self.theta.input_model[0]
 
             # All N particles at once. This is the per-particle loop vectorised: same
             # distributions, same normalisation, one draw per interval instead of N.

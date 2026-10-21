@@ -253,24 +253,21 @@ solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced
 options = {'influx': 'influx (mm/hr)', 'dt': 1, 'verbose': True, 'n_substeps': 1, 'record_state': True, 'validate_inputs': False,
            'max_age': None} # set at run time to the spinup length returned by prepend_spinup (None = full timeseries)
 
-# All three are positive scale parameters, so they get log-uniform priors over the same
+# Both are positive scale parameters, so they get log-uniform priors over the same
 # wide range: 0.08 permil is analyzer precision (0.08) and 3.5 permil is std of precip 18O -
 # any plausible structural error. Pinning them near analyzer precision is what collapsed the
 # filter -- 0.08 is the ONLY error term in the observation model, so it must also absorb
 # model structural error, and the best achievable fit is ~0.82 permil RMSE. At 0.08 the
 # filter treats an 11-sigma misfit as noise: particle ESS falls to ~2 of 25, every chain
 # degenerates equally, and the chain weights stop telling theta draws apart.
+# One input sigma for every precipitation sample: each value is the composite for its whole
+# sampling interval, so there is no separate "filled" uncertainty (removed 2026-10-21).
 obs_uncertainty = {
     # sig_u
-    'sigma observed C in': { #precip 18O': {
+    'sigma C in': { #precip 18O': {
         'prior_dis': 'loguniform',
         'prior_params': [0.08, 3.5], # [lower, upper]
         'is_nonnegative': True # sig_u becomes the scale for normal dist so can't be neg
-    },
-    'sigma filled C in': { #precip 18O':{
-        'prior_dis': 'loguniform',
-        'prior_params': [0.08, 3.5], # [lower, upper]
-        'is_nonnegative': True
     },
     'sigma C out': { #ORPB 18O':{
         'prior_dis': 'loguniform',

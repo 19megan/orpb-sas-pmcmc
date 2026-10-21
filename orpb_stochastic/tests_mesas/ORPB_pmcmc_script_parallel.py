@@ -173,9 +173,7 @@ def load_data(args):
                           index_col=0, parse_dates=[0])
 
     data_df["precip 18O"] = data_df["mean_c"]
-    # for col in ("discharge", "baseflow 1", "snowmelt", "rainfall", "ET"): #only needed for diff res datasets now all datasets are the same model resolution
-    #     data_df[f"{col} (mm/hr)"] = data_df[f"{col} (mm/{res})"]
-
+    
     # calibration window with one spinup year prepended (ORPB 18O set to NaN in the spinup)
     data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date)  # noqa: F405
 
@@ -184,11 +182,9 @@ def load_data(args):
     data_df["bf1_weight"] = data_df["baseflow 1 (mm/hr)"] / data_df["discharge (mm/hr)"]
     data_df["qf_weight"] = data_df["quickflow (mm/hr)"] / data_df["discharge (mm/hr)"]
 
-    data_df["is_obs_input"] = data_df["precip 18O"].notna()
-    data_df["is_obs_input_filled"] = data_df["precip 18O"].isna()
-
     df = data_df.copy()
     df["precip 18O"] = df["precip 18O"].bfill().ffill()
+    data_df["is_obs_input"] = data_df["precip 18O"].notna()
     df["is_obs_output"] = df["ORPB 18O"].notna()
     return df, n_spinup
 
