@@ -87,9 +87,10 @@ python -u ORPB_pmcmc_script_parallel.py \
     --run-tag "_D6M_job${SLURM_JOB_ID}" \
     --no-plot \
     --seed 5 \
-    --notes "PMMH, 2014 spinup prepended (max_age = 1 year)." \
+    --notes "PMMH, flux-only spinup of the preceding year (max_age = 1 year)." \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
-#NOTE: --start-date/--end-date are the calibration window. SPINUP_YEAR in ORPB_cases.py is
-#prepended automatically and excluded from the likelihood; the window must start after it.
+#NOTE: --start-date/--end-date are the calibration window. The year of fluxes before it is
+#prepended automatically as a flux-only spinup (isotopes blanked); the window must start on or
+#after 2015-01-01, a year into the data.

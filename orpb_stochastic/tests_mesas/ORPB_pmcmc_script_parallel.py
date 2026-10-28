@@ -98,10 +98,14 @@ def parse_args():
                    choices=["storage_q_ug_et_u_cp","storage_q_gg_et_u", "storage_q_ug_et_u",
                             "storage_q_u_et_u", "storage_q_g_et_u"])
     p.add_argument("--start-date", default="2015-01-01",
-                   help="First date of the calibration window. The SPINUP_YEAR (ORPB_cases.py) "
-                        "is prepended before it and excluded from the likelihood.")
+                   help="First date of the calibration window. The year of fluxes before it is "
+                        "prepended as a flux-only spinup (no isotopes; see prepend_spinup in "
+                        "ORPB_cases.py), so the earliest valid start is one year into the data.")
     p.add_argument("--end-date", default="2015-12-31")
     p.add_argument("--resolution", default="daily", choices=["hourly", "daily", "weekly", "biweekly", "monthly"])
+    p.add_argument("--coarsen-output", action="store_true",
+                   help="Scenario 2: also use the stream isotopes at --resolution (means of the "
+                        "grab samples). Default (scenario 1): stream isotopes at native daily.")
     p.add_argument("--data-root", default=os.environ.get(
         "MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets"))
     p.add_argument("--result-root", default=os.environ.get(
@@ -162,21 +166,33 @@ def load_init_theta(path, theta_names, D, max_logZ_gap=10.0):
                      for d in range(D)])
 
 
+def data_filename(args):
+    if args.coarsen_output:
+        return f"ORPB_isotope_data_precip 18O_{args.resolution}_ORPB 18O_{args.resolution}.csv"
+    return f"ORPB_isotope_data_precip 18O_{args.resolution}.csv"
+
+
 def load_data(args):
     res_map = {"hourly": "h", "daily": "D", "weekly": "W", "biweekly": "2W", "monthly": "ME"}
     if args.resolution not in res_map:
         raise ValueError(f"Unknown resolution: {args.resolution!r}. Expected one of {list(res_map)}.")
-    res = res_map[args.resolution]
 
-    fname = f"ORPB_isotope_data_precip 18O_{args.resolution}.csv"
-    data_df = pd.read_csv(os.path.join(args.data_root, fname),
+    data_df = pd.read_csv(os.path.join(args.data_root, data_filename(args)),
                           index_col=0, parse_dates=[0])
 
     data_df["precip 18O"] = data_df["mean_c"]
-    
-    # calibration window with one spinup year prepended (ORPB 18O set to NaN in the spinup)
-    data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date)  # noqa: F405
 
+    # calibration window with the preceding year of fluxes prepended (both isotopes NaN in the
+    # spinup). The bfill in prepare_frame copies the first window value over the spinup's
+    # precip 18O; that filler is never used (zero convolution weight, excluded from the input fit).
+    data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date)  # noqa: F405
+    # held-out validation months never enter calibration (VALIDATION_PERIODS, ORPB_cases.py)
+    mask_holdout(data_df, args.resolution if args.coarsen_output else "daily")  # noqa: F405
+    return prepare_frame(data_df), n_spinup
+
+
+def prepare_frame(data_df):
+    """Model columns shared by the calibration frame and validate.py's validation frame."""
     data_df["influx (mm/hr)"] = data_df[["rainfall (mm/hr)", "snowmelt (mm/hr)"]].sum(axis=1)
     data_df["quickflow (mm/hr)"] = data_df["discharge (mm/hr)"] - data_df["baseflow 1 (mm/hr)"]
     data_df["bf1_weight"] = data_df["baseflow 1 (mm/hr)"] / data_df["discharge (mm/hr)"]
@@ -186,7 +202,7 @@ def load_data(args):
     df["precip 18O"] = df["precip 18O"].bfill().ffill()
     df["is_obs_input"] = df["precip 18O"].notna()
     df["is_obs_output"] = df["ORPB 18O"].notna()
-    return df, n_spinup
+    return df
 
 
 # ----------------------------------------------------------------------------
@@ -362,8 +378,8 @@ def main():
 
     df, n_spinup = load_data(args)
     model_interface, config, theta_init = build_model_interface(args, df, n_spinup)
-    print(f"[info] spinup={SPINUP_YEAR} ({n_spinup} steps, = max_age) "  # noqa: F405
-          f"calibration window={df.index[n_spinup].date()}..{df.index[-1].date()}", flush=True)
+    print(f"[info] flux-only spinup={df.index[0].date()}..{df.index[n_spinup - 1].date()} "
+          f"({n_spinup} steps, = max_age) calibration window={df.index[n_spinup].date()}..{df.index[-1].date()}", flush=True)
 
     model = SSModel(
         model_interface=model_interface,
@@ -403,7 +419,9 @@ def main():
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "slurm_cpus_per_task": os.environ.get("SLURM_CPUS_PER_TASK"),
         "hostname": os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME"),
-        "spinup_year": SPINUP_YEAR,  # noqa: F405
+        "spinup": "flux_only",  # preceding year of fluxes, isotopes blanked; pre-window water = C_old
+        "coarsen_output": args.coarsen_output,  # scenario 2 if True
+        "holdout_months": HOLDOUT_MONTHS,  # noqa: F405  stream isotopes masked for validation
         "spinup_steps": n_spinup,
         "spinup_start": str(df.index[0]),
         "max_age": theta_init["options"]["max_age"],  # mesas options are not otherwise in the snapshot
@@ -418,7 +436,7 @@ def main():
         date_start=df.index[n_spinup],  # calibration window; spinup recorded in extra
         date_end=df.index[-1],
         resolution=res_code,
-        data_source=f"ORPB_isotope_data_precip 18O_{args.resolution}.csv",
+        data_source=data_filename(args),
         theta_to_estimate=model_interface._theta_to_estimate,
         theta_init=theta_init,
         seed=args.seed,

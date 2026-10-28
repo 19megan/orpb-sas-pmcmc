@@ -195,44 +195,64 @@ sas_specs_storage_q_g_et_u = {
 import numpy as np
 import pandas as pd
 
-# Spinup: one year of forcing prepended to every run, excluded from the likelihood.
-# max_age is set to the spinup length (one year in timesteps at any resolution), so every
-# observation sees a full year of resolved input history and C_old always means "water
-# older than one year" -- comparable across runs of different lengths. Whole years matter:
-# truncating mid-season leaves a seasonal bias that C_old cannot absorb.
-SPINUP_YEAR = '2014'
+# Spinup: the real year of water fluxes before each calibration window, with NO isotope data.
+# Its only job is to build a realistic age-ranked storage before the window starts, so pQ is
+# right from the first observation. Isotopes in the spinup would give a short test (e.g. 3M)
+# a year of input data it is not supposed to have, so they are blanked, and water that
+# entered during the spinup takes C_old in the convolution (_precompute_convolution in
+# ORPB_mesas_interface.py). C_old therefore means "water already in the catchment when the
+# window starts, or older than max_age" -- the same for every run length and resolution.
+# max_age is set to the spinup length (one year in timesteps).
 
-def prepend_spinup(data_df, start_date, end_date, spinup_year=SPINUP_YEAR, obs_col='ORPB 18O'):
-    """Return the calibration window with one year of spinup forcing prepended.
+def prepend_spinup(data_df, start_date, end_date, isotope_cols=('ORPB 18O', 'precip 18O')):
+    """Return the calibration window with the year of data before it prepended as spinup.
 
-    The spinup rows are the spinup_year rows of data_df, re-dated to end immediately before
-    start_date, with obs_col set to NaN so they are never evaluated in the likelihood.
+    The spinup rows are the data_df rows in [start_date - 1 year, start_date), with every
+    column in isotope_cols set to NaN: fluxes only, never isotopes.
 
     Returns:
         (pd.DataFrame, int): the combined dataframe (with a boolean 'is_spinup' column) and
         the number of spinup timesteps, which is the max_age to use.
     """
-    window = data_df.loc[pd.Timestamp(start_date): pd.Timestamp(end_date)]
-    spinup = data_df.loc[spinup_year].copy()
+    start = pd.Timestamp(start_date)
+    window = data_df.loc[start: pd.Timestamp(end_date)]
     if window.empty:
         raise ValueError(f"No data between {start_date} and {end_date}")
-    if window.index[0] <= spinup.index[-1]:
-        raise ValueError(f"Calibration window starting {window.index[0].date()} overlaps the "
-                         f"{spinup_year} spinup year; start after {spinup.index[-1].date()}")
+    spinup_start = start - pd.DateOffset(years=1)
+    if data_df.index[0] > spinup_start:
+        raise ValueError(f"Calibration window starting {start.date()} needs a year of fluxes "
+                         f"before it, but the data start {data_df.index[0].date()}; start on or "
+                         f"after {(data_df.index[0] + pd.DateOffset(years=1)).date()}")
 
-    # re-date so the spinup ends one timestep before the window, at the data's own frequency
-    freq = pd.infer_freq(spinup.index)
-    if freq is not None:
-        spinup.index = pd.date_range(end=window.index[0] - pd.tseries.frequencies.to_offset(freq),
-                                     periods=len(spinup), freq=freq)
-    else:  # irregular index: shift by a constant so the last spinup step sits one step before the window
-        step = spinup.index[-1] - spinup.index[-2]
-        spinup.index = spinup.index + (window.index[0] - step - spinup.index[-1])
-    spinup[obs_col] = np.nan
+    spinup = data_df.loc[(data_df.index >= spinup_start) & (data_df.index < start)].copy()
+    spinup[list(isotope_cols)] = np.nan
     spinup['is_spinup'] = True
 
     combined = pd.concat([spinup, window.assign(is_spinup=False)])
     return combined, len(spinup)
+
+# Held-out validation data, identical for every run in both scenarios. Stream isotopes in
+# HOLDOUT_MONTHS are removed from every calibration dataset (mask_holdout), so no run, whatever
+# its window, ever fits them: one month per season and per year, covering the drought onset
+# (2016-10), the lowest flows (2017-01) and the wettest month (2018-07). 2014 Jul-Dec needs no
+# mask: no window starts before 2015 and spinup isotopes are blanked.
+HOLDOUT_MONTHS = ['2015-04', '2016-10', '2017-01', '2018-07']
+VALIDATION_PERIODS = {'2014 Jul-Dec': ('2014-07-01', '2014-12-31'),
+                      **{m: (m, m) for m in HOLDOUT_MONTHS}}
+
+# Coarse stream values are means of the grab samples over the period ENDING at their stamp
+# (resample labels right; monthly values sit at month end). A value stamped up to this many
+# days after a held-out month still averages some of its grabs, so it is masked too.
+OUTPUT_SPILL_DAYS = {'daily': 0, 'weekly': 6, 'biweekly': 13, 'monthly': 0}
+
+def mask_holdout(df, output_resolution, obs_col='ORPB 18O', months=HOLDOUT_MONTHS):
+    """Set obs_col to NaN for every stream value that contains a held-out month's samples."""
+    spill = pd.Timedelta(days=OUTPUT_SPILL_DAYS[output_resolution])
+    for m in months:
+        month = pd.Period(m, freq='M')
+        last = month.end_time.normalize() + spill
+        df.loc[(df.index >= month.start_time) & (df.index <= last), obs_col] = np.nan
+    return df
 
 #c_old=-7.6
 solute_parameters = {'precip 18O': {'C_old': -7.28, # placeholder only; replaced each iteration by the sampled value
