@@ -67,9 +67,11 @@ data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_precip 18O_{res
 
 data_df['precip 18O'] = data_df['mean_c']
 
-# calibration window with SPINUP_YEAR (ORPB_cases.py) prepended; ORPB 18O is NaN in the spinup
+# calibration window with the preceding year of fluxes prepended (prepend_spinup, ORPB_cases.py);
+# both isotopes are NaN in the spinup and water that entered then takes C_old
 data_df, n_spinup = prepend_spinup(data_df, '2015-01-01', '2015-03-31 23:00:00')
 options['max_age'] = n_spinup # one year of resolved ages at every observation (shared by all theta_* cases)
+mask_holdout(data_df, 'daily') # held-out validation months (VALIDATION_PERIODS, ORPB_cases.py) never enter calibration
 tag='D3M'
 
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
@@ -93,7 +95,7 @@ case_name = 'storage_q_ug_et_u_cp'#********************
 
 num_input_scenarios = 3# 15 #N particles
 num_parameter_samples = 3 #15 #D #may need to change this as I change isotope timeseries configurations (fewer obs mean fewer timesteps where particles get reweighted which affect the variance of the likelihood estimate)
-len_parameter_MCMC = 2#5 #L
+len_parameter_MCMC = 4000#5 #L
 
 #%%
 # RUN MODEL 
@@ -322,8 +324,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = 'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 32551260 #32522132 #32489531 #32353996 #32361285 ###31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = '2W6M' #'W6M' #'W2Y' #'D2Y' #'D6M' ###'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
@@ -332,14 +334,15 @@ time = df.index
 st, et = df.index.get_loc(df['ORPB 18O'].first_valid_index()), df.index.get_loc(df['ORPB 18O'].last_valid_index())
 
 theta_df = pd.read_csv(f"{result_root}/theta_{case_name}_{tag}_job{job_id}.csv", index_col=0)
-theta_std_df = pd.read_csv(f"{result_root}/theta_std_{case_name}_{tag}_job{job_id}.csv", index_col=0)
+# theta_std_df = pd.read_csv(f"{result_root}/theta_std_{case_name}_{tag}_job{job_id}.csv", index_col=0)
 
 #%%
 
 # ANALYSIS AND PLOTTING
 # ===============================================================
 # Check convergence of theta parameters
-for i in range(len(theta_df.columns)-3):
+burn_in = 1000 # drop first ~25 as burn-in
+for i in range(len(theta_df.columns)-2): # skip the 2 sigmas at the end (3 before sigma filled C in was removed)
     # plot cumulative running mean of each parameter
     run_mean = np.cumsum(theta_df.iloc[:, i]) / np.arange(1, len(theta_df)+1)
     plt.figure(figsize=(12,4))
@@ -349,17 +352,18 @@ for i in range(len(theta_df.columns)-3):
     plt.ylabel('Cumulative Mean')
     plt.show()
     # check autocorrelation: number of independent draws
-    x = theta_df.iloc[25:, i] - theta_df.iloc[25:, i].mean()   # drop first ~25 as burn-in
+    x = theta_df.iloc[burn_in:, i] - theta_df.iloc[burn_in:, i].mean()   # drop first ~25 as burn-in
     acf = np.correlate(x, x, 'full')[len(x)-1:] / (x.var()*len(x))
     tau = 1 + 2*np.sum(acf[1:np.argmax(acf<0.05)])         # integrated autocorr time
     ess = len(x) / tau #want close to MC length for convergence, but if se is good then it's fine.
     se = x.std()/np.sqrt(ess)
-    post_std = theta_std_df.iloc[25:, i].mean() # mean of std of posterior draws
-    print(f'Posterior parameter mean = {theta_df.iloc[25:, i].mean():.3f}, std = {post_std:.3f}')
+    # post_std = theta_std_df.iloc[burn_in:, i].mean() # mean of std of posterior draws
+    post_std = theta_df.iloc[burn_in:, i].std()
+    print(f'Posterior parameter mean = {theta_df.iloc[burn_in:, i].mean():.3f}, std = {post_std:.3f}')
     print(f"ESS ≈ {ess:.0f} of {len(x)}, SE of mean ≈ {se:.3f}")
     print(f"SE/post_std = {se/post_std:.3f} (want << 1)") #if all seeds have <<1, convergence across seeds is solved
     # Geweke split test: compare mean of first 10% vs last 50% after burn-in
-    a, b = theta_df.iloc[25:35, i], theta_df.iloc[75:, i]
+    a, b = theta_df.iloc[burn_in:int(burn_in*1.25), i], theta_df.iloc[int(burn_in*2):int(burn_in*2.25), i]
     z = (a.mean() - b.mean()) / np.sqrt(a.var()/len(a) + b.var()/len(b))
     print(f'Z score: {z} (should be within +-2) - stationary')
 
@@ -373,13 +377,13 @@ def kde_mode(samples):
     x = np.linspace(samples.min(), samples.max(), 1000)
     return x[np.argmax(kde(x))]
 
-means = theta_df.iloc[25:, :].mean(axis=0)
-stds = theta_std_df.iloc[25:, :].mean(axis=0)
+means = theta_df.iloc[burn_in:, :].mean(axis=0)
+stds = theta_std_df.iloc[burn_in:, :].mean(axis=0) #for PG runs
 ncols = 3
-nrows = int(np.ceil((len(means)-3)/ncols))
+nrows = int(np.ceil((len(means)-2)/ncols))
 fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
 axes = axes.flatten()
-for i in range(len(means)-3):
+for i in range(len(means)-2):
     mean = means.iloc[i]
     std = stds.iloc[i]
     qfa_hist = np.random.normal(loc=mean, scale=std, size=10000)
@@ -410,7 +414,7 @@ plt.show()
 # plt.step(time[st:et], model_interface.df["ORPB 18O"].backfill().iloc[st:et], label= "observed")
 # plt.plot(time[st:et],model_interface.df["ORPB 18O"].iloc[st:et], "*", label= "observed")
 
-for i in range(len_parameter_MCMC - 3, len_parameter_MCMC + 1):
+for i in range(len_parameter_MCMC - 1, len_parameter_MCMC + 1):
     plt.figure(figsize=(12, 4))
 
     plt.step(
@@ -443,7 +447,7 @@ import hydroeval as he
 obs = df['ORPB 18O'].iloc[st:et].to_numpy()#for comparing with Rockfish imported results have to set df to same length and use that to compare
 mask = df['is_obs_output'].iloc[st:et]
 obs = obs[mask]
-for i in range(len_parameter_MCMC - 3, len_parameter_MCMC + 1):
+for i in range(len_parameter_MCMC - 1, len_parameter_MCMC + 1):
     # pred = output_scenarios[i, st:et]
     pred = output_scenarios.iloc[i, st:et].to_numpy() #for Rockfish runs
     pred = pred[mask]
@@ -527,8 +531,8 @@ from scipy.stats import gaussian_kde
 from astropy.stats import knuth_bin_width # maximizes posterior probability of the histogram - closely related to Shannon entropy
 from scipy.stats import entropy
 # Priors as [lower, upper, shape], in the order of _theta_to_estimate, where shape is
-# 'lin' for uniform and 'log' for log-uniform. The three sigmas are excluded from this
-# plot by the -3 in range() elsewhere; add them here if you want them plotted.
+# 'lin' for uniform and 'log' for log-uniform. The two sigmas (sigma C in, sigma C out) are
+# left out of this list, so they are not plotted; add them here ([0.08, 3.5, 'log'] each) if wanted.
 # NOTE: must match the priors in ORPB_cases.py for the case being plotted.
 prior_bounds = [
     [0.1, 200.0, 'log'],       # qf_weight scale
@@ -606,10 +610,25 @@ else:
     post_means = theta_df.iloc[25:, :].mean(axis=0)
     post_stds = theta_df.iloc[25:,:].std(axis=0) #theta_std should be variation in L thetas, theta_std_df is null, theta_std_df.iloc[25:, :].mean(axis=0)
 
-# KLD(posterior || prior): information gained over the prior. Binned over the PRIOR's
-# support, in log space for log-uniform priors, where the prior is flat so each bin holds
-# exactly 1/nbins of the prior mass.
-nbins = 40
+# KLD(posterior || prior): information gained over the prior.
+# OLD (kept for reference): binned over the PRIOR's support with nbins = 40, in log space for
+# log-uniform priors. A binned KLD can never exceed ln(nbins) = 3.69 nats, reached when the whole
+# posterior falls in one bin, so it understated well-constrained parameters (C_old: 3.68 binned
+# vs about 5.6 actual) and could not show further gains between windows.
+# NEW: bin-free. In u = position within the prior range in the prior's flat coordinate, the
+# prior is Uniform(0, 1), so KLD = -H(posterior of u). H is estimated with a Gaussian KDE
+# whose draws are mirrored across 0 and 1, so no density is placed outside the prior's bounds.
+# Checked against exact values (normal, two-mode, and piled-against-a-bound posteriors, with
+# MCMC-style repeated values): within about 0.04 nats.
+def kld_reflect(x, lo, hi, shape, n_fit=20000, n_eval=5000, seed=0):
+    f = np.log if shape == 'log' else (lambda v: v)
+    u = (f(np.asarray(x, float)) - f(lo)) / (f(hi) - f(lo))
+    rng = np.random.default_rng(seed)
+    kde = gaussian_kde(rng.choice(u, size=min(n_fit, u.size), replace=False))
+    ev = rng.choice(u, size=min(n_eval, u.size), replace=False)
+    return float(np.mean(np.log(kde(ev) + kde(-ev) + kde(2.0 - ev))))
+
+nbins = 40  # histogram bins for the plots only
 ncols = 3
 nrows = int(np.ceil(len(prior_bounds)/ncols))
 fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
@@ -627,12 +646,14 @@ for i in range(len(prior_bounds)):
 
     fwd = np.log if shape == 'log' else (lambda v: v)
     edges = np.linspace(fwd(lo), fwd(hi), nbins + 1)
-    P_probabilities = np.full(nbins, 1.0 / nbins)
-    counts, _ = np.histogram(fwd(post_hist), bins=edges)
-    Q_probabilities = counts / counts.sum()
-
-    kld_bits = entropy(Q_probabilities, P_probabilities, base=2)      # log₂ ⇒ bits
-    kld_nats = entropy(Q_probabilities, P_probabilities)              # natural log ⇒ nats
+    # OLD binned KLD (capped at ln(nbins), see above):
+    # P_probabilities = np.full(nbins, 1.0 / nbins)
+    # counts, _ = np.histogram(fwd(post_hist), bins=edges)
+    # Q_probabilities = counts / counts.sum()
+    # kld_bits = entropy(Q_probabilities, P_probabilities, base=2)      # log₂ ⇒ bits
+    # kld_nats = entropy(Q_probabilities, P_probabilities)              # natural log ⇒ nats
+    kld_nats = kld_reflect(post_hist, lo, hi, shape)                    # natural log ⇒ nats
+    kld_bits = kld_nats / np.log(2)                                     # log₂ ⇒ bits
     # Plot histogram (x axis in the prior's own scale)
     plot_bins = np.exp(edges) if shape == 'log' else edges
     prior_hist = (np.exp(np.random.uniform(np.log(lo), np.log(hi), size=10000)) if shape == 'log'
