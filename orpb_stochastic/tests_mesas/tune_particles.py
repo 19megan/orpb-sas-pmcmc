@@ -59,6 +59,8 @@ def main():
     p.add_argument("--end-date", default="2015-12-31")
     p.add_argument("--resolution", default="daily",
                    choices=["hourly", "daily", "weekly", "biweekly", "monthly"])
+    p.add_argument("--coarsen-output", action="store_true",
+                   help="Scenario 2 data (stream isotopes at --resolution); must match the pilot")
     p.add_argument("--data-root", default=os.environ.get(
         "MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets"))
     p.add_argument("--seed", type=int, default=42)
