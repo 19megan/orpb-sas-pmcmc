@@ -87,10 +87,11 @@ python -u ORPB_pmcmc_script_parallel.py \
     --run-tag "_D6M_job${SLURM_JOB_ID}" \
     --no-plot \
     --seed 5 \
-    --notes "PMMH, flux-only spinup of the preceding year (max_age = 1 year)." \
+    --notes "PMMH, isoscape spinup of the preceding year (max_age = 1 year)." \
 
 echo "Job ${SLURM_JOB_ID} finished. Results in $MESAS_RESULT_ROOT"
 
 #NOTE: --start-date/--end-date are the calibration window. The year of fluxes before it is
-#prepended automatically as a flux-only spinup (isotopes blanked); the window must start on or
-#after 2015-01-01, a year into the data.
+#prepended automatically as spinup (no sampled isotopes; precip 18O from the IsoMAP monthly
+#climatology in $MESAS_DATA_ROOT/isomap.csv); the window must start on or after 2015-01-01, a
+#year into the data.

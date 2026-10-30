@@ -279,7 +279,7 @@ class ModelInterfaceMesas:
         self.df = df
         self.N = num_input_scenarios
         self.T = len(self.df)  # set T to be the length of the dataframe
-        # leading flux-only spinup rows (prepend_spinup); their isotope values are filler
+        # leading spinup rows (prepend_spinup); their input isotopes are the isoscape, not samples
         self.n_spinup = int(self.df["is_spinup"].sum()) if "is_spinup" in self.df else 0
         self.R_prime = None  # preprocessed input scenarios
         self.num_states, self.num_obs = None, None
@@ -729,8 +729,8 @@ class ModelInterfaceMesas:
         input_obs = self.df[self.in_sol].to_numpy()
         input_forcing = self.influx.to_numpy()
 
-        # the observed samples in the calibration window; the spinup's values are only the
-        # bfilled first window value and must not shape the fluctuation distribution
+        # the observed samples in the calibration window; the spinup's isoscape values are not
+        # samples and must not shape the fluctuation distribution
         in_window = np.arange(self.T) >= self.n_spinup
         valid_input = input_obs[is_input_obs.astype(bool) & in_window]
         # valid_input = valid_input[valid_input > 0]
@@ -938,18 +938,18 @@ class ModelInterfaceMesas:
 
         Set:
             _conv_weights[flux][sol] (np.ndarray): [max_age, T] pQ * sol_factor * dt, zeroed where
-                age > t - n_spinup
-            _P_resolved[flux] (np.ndarray): [T] fraction of the flux with age <=
-                min(t - n_spinup, max_age-1), i.e. that entered during the calibration window
+                age > t
+            _P_resolved[flux] (np.ndarray): [T] fraction of the flux with age <= min(t, max_age-1),
+                i.e. that entered during the frame (spinup with isoscape C_in, or window)
         """
         self._conv_weights = {}
         self._P_resolved = {}
         for flux in ['discharge (mm/hr)']:
             pQ = self._sas_funcs[flux]
             max_age, T = pQ.shape
-            # only water that entered in the calibration window has a known C_in; anything that
-            # entered during the flux-only spinup, or is older than max_age, is C_old
-            resolvable = np.arange(max_age)[:, None] <= np.arange(T)[None, :] - self.n_spinup
+            # water that entered in the spinup (isoscape C_in) or the window has a C_in; water
+            # from before the frame, or older than max_age, is C_old
+            resolvable = np.arange(max_age)[:, None] <= np.arange(T)[None, :]
             pQ_resolvable = np.where(resolvable, pQ, 0.0)
             self._P_resolved[flux] = pQ_resolvable.sum(axis=0) * self.dt
             self._conv_weights[flux] = {

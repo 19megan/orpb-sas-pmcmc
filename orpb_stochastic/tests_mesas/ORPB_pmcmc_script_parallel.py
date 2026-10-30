@@ -99,7 +99,8 @@ def parse_args():
                             "storage_q_u_et_u", "storage_q_g_et_u"])
     p.add_argument("--start-date", default="2015-01-01",
                    help="First date of the calibration window. The year of fluxes before it is "
-                        "prepended as a flux-only spinup (no isotopes; see prepend_spinup in "
+                        "prepended as spinup (no sampled isotopes; precip 18O from the IsoMAP "
+                        "monthly climatology, <data-root>/isomap.csv; see prepend_spinup in "
                         "ORPB_cases.py), so the earliest valid start is one year into the data.")
     p.add_argument("--end-date", default="2015-12-31")
     p.add_argument("--resolution", default="daily", choices=["hourly", "daily", "weekly", "biweekly", "monthly"])
@@ -182,10 +183,10 @@ def load_data(args):
 
     data_df["precip 18O"] = data_df["mean_c"]
 
-    # calibration window with the preceding year of fluxes prepended (both isotopes NaN in the
-    # spinup). The bfill in prepare_frame copies the first window value over the spinup's
-    # precip 18O; that filler is never used (zero convolution weight, excluded from the input fit).
-    data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date)  # noqa: F405
+    # calibration window with the preceding year of fluxes prepended: no stream isotopes, and
+    # the IsoMAP monthly climatology as precip 18O (excluded from the input fit)
+    data_df, n_spinup = prepend_spinup(data_df, args.start_date, args.end_date,  # noqa: F405
+                                       load_isoscape(args.data_root))  # noqa: F405
     # held-out validation months never enter calibration (VALIDATION_PERIODS, ORPB_cases.py)
     mask_holdout(data_df, args.resolution if args.coarsen_output else "daily")  # noqa: F405
     return prepare_frame(data_df), n_spinup
@@ -378,7 +379,7 @@ def main():
 
     df, n_spinup = load_data(args)
     model_interface, config, theta_init = build_model_interface(args, df, n_spinup)
-    print(f"[info] flux-only spinup={df.index[0].date()}..{df.index[n_spinup - 1].date()} "
+    print(f"[info] isoscape spinup={df.index[0].date()}..{df.index[n_spinup - 1].date()} "
           f"({n_spinup} steps, = max_age) calibration window={df.index[n_spinup].date()}..{df.index[-1].date()}", flush=True)
 
     model = SSModel(
@@ -419,7 +420,8 @@ def main():
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "slurm_cpus_per_task": os.environ.get("SLURM_CPUS_PER_TASK"),
         "hostname": os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME"),
-        "spinup": "flux_only",  # preceding year of fluxes, isotopes blanked; pre-window water = C_old
+        "spinup": "isoscape",  # preceding year of fluxes, precip 18O = IsoMAP monthly climatology
+        "isoscape_col": ISOSCAPE_COL,  # noqa: F405
         "coarsen_output": args.coarsen_output,  # scenario 2 if True
         "holdout_months": HOLDOUT_MONTHS,  # noqa: F405  stream isotopes masked for validation
         "spinup_steps": n_spinup,

@@ -192,23 +192,41 @@ sas_specs_storage_q_g_et_u = {
 
 }
 
+import os
+
 import numpy as np
 import pandas as pd
 
-# Spinup: the real year of water fluxes before each calibration window, with NO isotope data.
-# Its only job is to build a realistic age-ranked storage before the window starts, so pQ is
-# right from the first observation. Isotopes in the spinup would give a short test (e.g. 3M)
-# a year of input data it is not supposed to have, so they are blanked, and water that
-# entered during the spinup takes C_old in the convolution (_precompute_convolution in
-# ORPB_mesas_interface.py). C_old therefore means "water already in the catchment when the
-# window starts, or older than max_age" -- the same for every run length and resolution.
-# max_age is set to the spinup length (one year in timesteps).
+# Spinup: the real year of water fluxes before each calibration window, with NO sampled isotope
+# data. It builds a realistic age-ranked storage before the window starts, so pQ is right from
+# the first observation. Sampled isotopes in the spinup would give a short test (e.g. 3M) a
+# year of input data it is not supposed to have, so they are blanked and the spinup precip
+# 18O is the IsoMAP monthly climatology for Pond Branch instead: the same for every run and
+# not derived from the Pond Branch samples, but it gives the water already in storage when
+# the window starts a seasonal composition rather than one flat C_old. The isoscape matches
+# the observed amount-weighted annual mean (-6.9 vs -6.3..-7.1 per mil, 2014-2018) but single
+# months are off by ~2.5 per mil. C_old means "water older than max_age"; max_age is set to
+# the spinup length (one year in timesteps).
+ISOSCAPE_FILE = 'isomap.csv'   # in data_root; 12 rows, Jan..Dec
+ISOSCAPE_COL = 'O18_PB'
 
-def prepend_spinup(data_df, start_date, end_date, isotope_cols=('ORPB 18O', 'precip 18O')):
+
+def load_isoscape(data_root, col=ISOSCAPE_COL):
+    """IsoMAP monthly precipitation isotope averages, indexed by calendar month 1..12."""
+    iso = pd.read_csv(os.path.join(data_root, ISOSCAPE_FILE))[col]
+    if len(iso) != 12:
+        raise ValueError(f"{ISOSCAPE_FILE} should have 12 monthly rows, found {len(iso)}")
+    iso.index = range(1, 13)
+    return iso
+
+
+def prepend_spinup(data_df, start_date, end_date, isoscape,
+                   isotope_cols=('ORPB 18O', 'precip 18O')):
     """Return the calibration window with the year of data before it prepended as spinup.
 
     The spinup rows are the data_df rows in [start_date - 1 year, start_date), with every
-    column in isotope_cols set to NaN: fluxes only, never isotopes.
+    column in isotope_cols set to NaN (no sampled isotopes), then precip 18O set to the
+    isoscape value of each row's calendar month (load_isoscape).
 
     Returns:
         (pd.DataFrame, int): the combined dataframe (with a boolean 'is_spinup' column) and
@@ -226,6 +244,7 @@ def prepend_spinup(data_df, start_date, end_date, isotope_cols=('ORPB 18O', 'pre
 
     spinup = data_df.loc[(data_df.index >= spinup_start) & (data_df.index < start)].copy()
     spinup[list(isotope_cols)] = np.nan
+    spinup['precip 18O'] = spinup.index.month.map(isoscape).to_numpy()
     spinup['is_spinup'] = True
 
     combined = pd.concat([spinup, window.assign(is_spinup=False)])
@@ -235,7 +254,7 @@ def prepend_spinup(data_df, start_date, end_date, isotope_cols=('ORPB 18O', 'pre
 # HOLDOUT_MONTHS are removed from every calibration dataset (mask_holdout), so no run, whatever
 # its window, ever fits them: one month per season and per year, covering the drought onset
 # (2016-10), the lowest flows (2017-01) and the wettest month (2018-07). 2014 Jul-Dec needs no
-# mask: no window starts before 2015 and spinup isotopes are blanked.
+# mask: no window starts before 2015 and spinup stream isotopes are blanked.
 HOLDOUT_MONTHS = ['2015-04', '2016-10', '2017-01', '2018-07']
 VALIDATION_PERIODS = {'2014 Jul-Dec': ('2014-07-01', '2014-12-31'),
                       **{m: (m, m) for m in HOLDOUT_MONTHS}}

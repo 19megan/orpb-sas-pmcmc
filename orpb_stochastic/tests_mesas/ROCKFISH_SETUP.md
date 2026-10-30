@@ -77,8 +77,9 @@ package too — no reinstall needed after pulling.
 - **`ORPB_pmcmc_script_parallel.py`** reads its data path from `MESAS_DATA_ROOT` (via the
   `--data-root` default), falling back to the local macOS path so nothing changes on the
   laptop. The spinup is not a separate file: `prepend_spinup` in `ORPB_cases.py` prepends
-  the year of fluxes before the window from the same dataset (isotopes blanked), so there is
-  no spinup CSV or tag to keep in sync.
+  the year of fluxes before the window from the same dataset (sampled isotopes blanked,
+  precip 18O from the IsoMAP climatology), so there is no spinup CSV or tag to keep in sync.
+  `isomap.csv` must be in `MESAS_DATA_ROOT` next to the resolution datasets.
 - **`slurm_ORPB_pmcmc.sh`** loads the mesas v2 env and `cd`s to
   `$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas` (was `mesas.stochastic/tests_mesas`).
 
@@ -255,9 +256,10 @@ line of the script, after the run), and the failure was silent: the code fell ba
 default. Worth re-checking whenever you add a variable.
 
 **The calibration window must start at least a year into the data.** `prepend_spinup` in
-`ORPB_cases.py` prepends the real year of fluxes before `--start-date`, with both isotope
-columns blanked, so the spinup builds storage without adding isotope data beyond the tested
-window. With data starting 2014-01-01, a `--start-date` before 2015-01-01 raises a
+`ORPB_cases.py` prepends the real year of fluxes before `--start-date`, with both sampled
+isotope columns blanked and precip 18O set to the IsoMAP monthly climatology, so the spinup
+builds storage and a seasonal storage composition without adding sampled isotope data beyond
+the tested window. With data starting 2014-01-01, a `--start-date` before 2015-01-01 raises a
 `ValueError` at data load.
 
 **`logs/` must exist in the submit directory before the first `sbatch`.** SLURM opens

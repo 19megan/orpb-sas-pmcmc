@@ -101,7 +101,7 @@ def validate_run(npz_path, data_root, num_draws, seed):
     with open(os.path.join(os.path.dirname(npz_path), f"run_config_{tag}.json")) as f:
         cfg = json.load(f)
     extra = cfg["metadata"]["extra"]
-    if extra.get("holdout_months") != HOLDOUT_MONTHS or extra.get("spinup") != "flux_only":
+    if extra.get("holdout_months") != HOLDOUT_MONTHS or extra.get("spinup") != "isoscape":
         print(f"[skip] {tag}: calibrated before the held-out months were masked (or with "
               f"another spinup), so its validation scores would be partly in-sample", flush=True)
         return []

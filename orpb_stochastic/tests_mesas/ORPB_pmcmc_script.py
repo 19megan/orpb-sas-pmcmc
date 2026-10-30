@@ -68,11 +68,11 @@ data_df = pd.read_csv(f"{data_resolution_root}/ORPB_isotope_data_precip 18O_{res
 data_df['precip 18O'] = data_df['mean_c']
 
 # calibration window with the preceding year of fluxes prepended (prepend_spinup, ORPB_cases.py);
-# both isotopes are NaN in the spinup and water that entered then takes C_old
-data_df, n_spinup = prepend_spinup(data_df, '2015-01-01', '2015-03-31 23:00:00')
+# no sampled isotopes in the spinup; its precip 18O is the IsoMAP monthly climatology
+data_df, n_spinup = prepend_spinup(data_df, '2015-10-01', '2016-03-31 23:00:00', load_isoscape(data_root))
 options['max_age'] = n_spinup # one year of resolved ages at every observation (shared by all theta_* cases)
 mask_holdout(data_df, 'daily') # held-out validation months (VALIDATION_PERIODS, ORPB_cases.py) never enter calibration
-tag='D3M'
+tag='D6M_cold'
 
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
 data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum(axis=1)
@@ -324,8 +324,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 32551260 #32522132 #32489531 #32353996 #32361285 ###31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = '2W6M' #'W6M' #'W2Y' #'D2Y' #'D6M' ###'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 32640997 ##32551260 #32522132 #32489531 #32353996 #32361285 ###31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = 'D6M_cold' ##'2W6M' #'W6M' #'W2Y' #'D2Y' #'D6M' ###'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
