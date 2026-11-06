@@ -779,6 +779,12 @@ class ModelInterfaceMesas:
             # R_temp[R_temp < 0] = 0.0 # only for Cl- isotope
             self.R_prime[:, start_ind:end_ind] = R_temp
 
+        # the spinup's isoscape values are taken as known: sigma C in describes the samples in the
+        # calibration window, not the climatology, so no particle noise on them
+        spinup_forcing = input_forcing[:self.n_spinup].ravel()
+        spinup_values = input_obs[:self.n_spinup].ravel()
+        self.R_prime[:, :self.n_spinup] = np.where(spinup_forcing != 0, spinup_values, 0.0)
+
         # get dimension right
         self.R_prime = self.R_prime[:, :, np.newaxis]
 

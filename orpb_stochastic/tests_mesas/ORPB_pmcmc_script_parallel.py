@@ -422,6 +422,7 @@ def main():
         "hostname": os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME"),
         "spinup": "isoscape",  # preceding year of fluxes, precip 18O = IsoMAP monthly climatology
         "isoscape_col": ISOSCAPE_COL,  # noqa: F405
+        "spinup_input_noise": False,  # spinup isoscape inputs taken as known (no sigma C in noise)
         "coarsen_output": args.coarsen_output,  # scenario 2 if True
         "holdout_months": HOLDOUT_MONTHS,  # noqa: F405  stream isotopes masked for validation
         "spinup_steps": n_spinup,

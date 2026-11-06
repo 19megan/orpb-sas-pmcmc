@@ -105,6 +105,12 @@ def validate_run(npz_path, data_root, num_draws, seed):
         print(f"[skip] {tag}: calibrated before the held-out months were masked (or with "
               f"another spinup), so its validation scores would be partly in-sample", flush=True)
         return []
+    # runs from before the spinup inputs were taken as known have no key, and had sigma C in
+    # noise on the isoscape values
+    if extra.get("spinup_input_noise", True):
+        print(f"[skip] {tag}: calibrated with sigma C in noise on the spinup isoscape inputs",
+              flush=True)
+        return []
 
     case = cfg["case"]["name"]
     if case not in interfaces:
