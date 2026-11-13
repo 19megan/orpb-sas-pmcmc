@@ -121,7 +121,14 @@ def validate_run(npz_path, data_root, num_draws, seed):
     names = [str(n) for n in pm["theta_names"]]
     if names != list(mi._theta_to_estimate):
         raise ValueError(f"{tag}: parameters {names} do not match case {case}")
-    flat = pm["theta_chains"][:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
+    # chains flagged by stuck_check.py (stuck on a filter overestimate) are left out, as recorded
+    # in the run_config: "excluded_chains" in metadata.extra
+    excluded = extra.get("excluded_chains", [])
+    if excluded:
+        print(f"[info] {tag}: leaving out chains {excluded} (run_config excluded_chains)", flush=True)
+    kept = np.delete(pm["theta_chains"], excluded, axis=0)
+    # flat = pm["theta_chains"][:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
+    flat = kept[:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
     draws = flat[rng.choice(len(flat), size=min(num_draws, len(flat)), replace=False)]
 
     cin = df[SOL].to_numpy()
@@ -149,7 +156,7 @@ def validate_run(npz_path, data_root, num_draws, seed):
     meta = {"tag": tag, "case": case, "source": cfg["data"]["source"],
             "coarsen_output": extra.get("coarsen_output", False),
             "date_start": cfg["data"]["date_start"], "date_end": cfg["data"]["date_end"],
-            "num_draws": len(draws)}
+            "num_draws": len(draws), "excluded_chains": " ".join(map(str, excluded))}
     print(f"[done] {tag}: mean-of-periods rmse {rows[-1]['rmse']:.3f}, crps {rows[-1]['crps']:.3f}",
           flush=True)
     return [{**meta, **r} for r in rows]

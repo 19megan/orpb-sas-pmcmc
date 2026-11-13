@@ -69,10 +69,10 @@ data_df['precip 18O'] = data_df['mean_c']
 
 # calibration window with the preceding year of fluxes prepended (prepend_spinup, ORPB_cases.py);
 # no sampled isotopes in the spinup; its precip 18O is the IsoMAP monthly climatology
-data_df, n_spinup = prepend_spinup(data_df, '2015-10-01', '2016-03-31 23:00:00', load_isoscape(data_root))
+data_df, n_spinup = prepend_spinup(data_df, '2015-01-01', '2016-12-31 23:00:00', load_isoscape(data_root))
 options['max_age'] = n_spinup # one year of resolved ages at every observation (shared by all theta_* cases)
 mask_holdout(data_df, 'daily') # held-out validation months (VALIDATION_PERIODS, ORPB_cases.py) never enter calibration
-tag='D6M_cold'
+tag='D2Y'
 
 issample = np.logical_not(np.isnan(data_df['ORPB 18O']))
 data_df['influx (mm/hr)'] = data_df[['rainfall (mm/hr)','snowmelt (mm/hr)']].sum(axis=1)
@@ -324,8 +324,8 @@ save_run_config(
 
 # %% RELOAD AND PLOT SAVED RESULTS
 # ================================================================
-job_id = 32640997 ##32551260 #32522132 #32489531 #32353996 #32361285 ###31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
-tag = 'D6M_cold' ##'2W6M' #'W6M' #'W2Y' #'D2Y' #'D6M' ###'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
+job_id = 32970078 ##32640997 ##32551260 #32522132 #32489531 #32353996 #32361285 ###31124028 #30318146 #30284266 #30283655 #30129037 #30127986 #30124944 #30103937 #30082173 #30059682 #30020017 #30012536 #30010587 #29974181 #29958090 #29939048 #29933214 #29932998 #29871348 #29855297 #29823188 #29559083 #29549979 #29558156 #29536818 #29533975 #29530372 #29529496 #29402285 #27418806 #27228056 #27188083 #26141032 #26305810 #26135647 #25498196 #25481520 #25479958 #25439135 #25437692 #25421159 #25359163 #25357231 #25351802 #25251898
+tag = 'D2Y' ##'D6M_cold' ##'2W6M' #'W6M' #'W2Y' #'D2Y' #'D6M' ###'D3M' #'D_3MF' #'ME_3M' #'D_3M' #'D_3M' #'ME_3ystd' #'D_3ystd' #'D4Y' #'ME4Y' #'ME2Y' #'ME1Y' #'ME6M' #'ME3M' #'2W4Y' #'2W2Y' #'2W1Y' #'2W6M' #'2W3M' #'W4Y' #'W2Y' #'W1Y' #'W6M' #'D3M' #'W3M' #'D2Y' #'D1Y' #'D6M' #'D6M' #'h6M' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D2Y' #'D5Y'
 pQ_mle = pd.read_table(f"{result_root}/pQ_mle_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None).to_numpy()
 PQ_mle = np.cumsum(pQ_mle, axis=0)*1 # * config['dt']
 input_scenarios = pd.read_table(f"{result_root}/input_scenarios_{case_name}_{tag}_job{job_id}.csv", delimiter=",", header=None)
@@ -604,7 +604,19 @@ pmmh_file = f"{result_root}/pmmh_{case_name}_{tag}_job{job_id}.npz"
 if os.path.exists(pmmh_file):
     _pm = np.load(pmmh_file)
     _b = int(_pm["num_burnin"])
-    post_draws = _pm["theta_chains"][:, _b + 1:, :].reshape(-1, _pm["theta_chains"].shape[-1])
+    # chains flagged by stuck_check.py are left out, as validate.py does: "excluded_chains" in
+    # the run_config's metadata.extra
+    import json
+    _cfg_file = f"{result_root}/run_config_{case_name}_{tag}_job{job_id}.json"
+    _excluded = []
+    if os.path.exists(_cfg_file):
+        with open(_cfg_file) as _f:
+            _excluded = json.load(_f)["metadata"]["extra"].get("excluded_chains", [])
+    if _excluded:
+        print(f"leaving out chains {_excluded} (run_config excluded_chains)")
+    # post_draws = _pm["theta_chains"][:, _b + 1:, :].reshape(-1, _pm["theta_chains"].shape[-1])
+    post_draws = np.delete(_pm["theta_chains"], _excluded, axis=0)[:, _b + 1:, :].reshape(
+        -1, _pm["theta_chains"].shape[-1])
 else:
     post_draws = None
     post_means = theta_df.iloc[25:, :].mean(axis=0)
