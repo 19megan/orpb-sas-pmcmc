@@ -37,7 +37,9 @@ import sys
 from types import SimpleNamespace
 
 script_folder = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, script_folder)
+# sys.path.insert(0, script_folder)
+# the runner and ORPB_cases stay with the run scripts in tests_mesas
+sys.path.insert(0, os.path.join(os.path.dirname(script_folder), "tests_mesas"))
 import numpy as np   # noqa: E402
 import pandas as pd   # noqa: E402
 

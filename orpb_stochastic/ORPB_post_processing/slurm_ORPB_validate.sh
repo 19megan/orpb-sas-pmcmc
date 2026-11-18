@@ -45,7 +45,8 @@ export NUMBA_NUM_THREADS=1
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
+# cd "$MESAS_REPO_ROOT/orpb_stochastic/tests_mesas"
+cd "$MESAS_REPO_ROOT/orpb_stochastic/ORPB_post_processing"
 
 # --runs is quoted so python expands the glob: every pmmh_*.npz in every job folder. Runs
 # calibrated before the held-out mask (no holdout_months in run_config) are skipped.
