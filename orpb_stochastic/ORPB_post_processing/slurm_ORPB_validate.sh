@@ -55,6 +55,7 @@ python -u validate.py \
     --runs "$RESULTS/*/pmmh_*.npz" \
     --out "$OUT_DIR/validation_scores_job${SLURM_JOB_ID}.csv" \
     --num-draws 200 \
-    --seed 0
+    --seed 0 \
+    --plot-dir "$RESULTS/ORPB_validation_plots"
 
 echo "Job ${SLURM_JOB_ID} finished. Scores in $OUT_DIR"

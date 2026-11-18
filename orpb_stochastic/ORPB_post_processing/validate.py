@@ -91,10 +91,61 @@ def scores(ens, point, y):
             "cover90": float(np.mean((y >= lo) & (y <= hi)))}
 
 
+def plot_run(tag, df, preds, ens, point, rows, plot_dir):
+    """Observed vs predicted stream 18O in each validation period, from the same draws as the
+    scores. Dark band: 5-95% of the model predictions (parameter uncertainty); light band: 5-95%
+    of the predictive draws (adds sigma C out; the band cover90 counts)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    y_all = df[OBS].to_numpy()
+    p_lo, p_hi = np.percentile(preds, [5, 95], axis=0)
+    e_lo, e_hi = np.percentile(ens, [5, 95], axis=0)
+    score = {r["period"]: r for r in rows}
+    periods = list(VALIDATION_PERIODS.items())
+    # the long period across the top, the single held-out months below
+    fig = plt.figure(figsize=(3.2 * max(len(periods) - 1, 1), 6.4))
+    gs = fig.add_gridspec(2, max(len(periods) - 1, 1))
+    axes = [fig.add_subplot(gs[0, :])] + [fig.add_subplot(gs[1, k]) for k in range(len(periods) - 1)]
+    for k, (ax, (period, (start, end))) in enumerate(zip(axes, periods)):
+        sel = df.index.isin(df.loc[start:end].index)
+        t = df.index[sel]
+        ax.fill_between(t, e_lo[sel], e_hi[sel], color="#cde2fb", lw=0,
+                        label="5-95% predictive (with sigma C out)")
+        ax.fill_between(t, p_lo[sel], p_hi[sel], color="#86b6ef", lw=0,
+                        label="5-95% model (parameters)")
+        ax.plot(t, point[sel], color="#1c5cab", lw=1.5, label="median prediction")
+        ax.plot(t, y_all[sel], "o", color="#0b0b0b", ms=3, label="observed")
+        s = score[period]
+        ax.set_title(f"{period} (n = {s['n_obs']})\nRMSE {s['rmse']:.2f}, bias {s['bias']:+.2f}, "
+                     f"cover90 {s['cover90']:.2f}", fontsize=9)
+        ax.xaxis.set_major_locator(mdates.MonthLocator() if k == 0 else mdates.DayLocator(bymonthday=[1, 8, 15, 22]))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y" if k == 0 else "%d %b"))
+        ax.tick_params(axis="x", labelsize=8)
+        ax.grid(axis="y", color="#e5e4e0", lw=0.8)
+        ax.spines[["top", "right"]].set_visible(False)
+        if k <= 1:
+            ax.set_ylabel("Stream 18O (‰)")
+    h, lab = axes[0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    m = score["mean of periods"]
+    fig.suptitle(f"{tag}\nmean of periods: RMSE {m['rmse']:.2f}, bias {m['bias']:+.2f}, "
+                 f"cover90 {m['cover90']:.2f}", fontsize=10)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    os.makedirs(plot_dir, exist_ok=True)
+    path = os.path.join(plot_dir, f"validation_{tag}.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 _INTERFACES = {}   # one validation interface per SAS case, per process
 
 
-def validate_run(npz_path, data_root, num_draws, seed):
+# def validate_run(npz_path, data_root, num_draws, seed):
+def validate_run(npz_path, data_root, num_draws, seed, plot_dir=None):
     # same seed for every run: common draws of the predictive noise, so score differences
     # between runs are not partly sampling noise
     rng = np.random.default_rng(seed)
@@ -161,6 +212,8 @@ def validate_run(npz_path, data_root, num_draws, seed):
             "num_draws": len(draws), "excluded_chains": " ".join(map(str, excluded))}
     print(f"[done] {tag}: mean-of-periods rmse {rows[-1]['rmse']:.3f}, crps {rows[-1]['crps']:.3f}",
           flush=True)
+    if plot_dir:
+        print(f"[plot] {plot_run(tag, df, preds, ens, point, rows, plot_dir)}", flush=True)
     return [{**meta, **r} for r in rows]
 
 
@@ -177,12 +230,16 @@ def main():
     p.add_argument("--num-cores", type=int,
                    default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)),
                    help="runs validated in parallel, one per process (default: SLURM allocation)")
+    p.add_argument("--plot-dir", default=None,
+                   help="also save an observed vs predicted figure per run here, e.g. "
+                        "<result_root>/ORPB_validation_plots (same draws as the scores)")
     args = p.parse_args()
 
     paths = sorted({f for pattern in args.runs for f in glob.glob(pattern)})
     if not paths:
         raise SystemExit(f"No files match {args.runs}")
-    jobs = [(path, args.data_root, args.num_draws, args.seed) for path in paths]
+    # jobs = [(path, args.data_root, args.num_draws, args.seed) for path in paths]
+    jobs = [(path, args.data_root, args.num_draws, args.seed, args.plot_dir) for path in paths]
     num_cores = max(1, min(args.num_cores, len(paths)))
     print(f"[info] {len(paths)} runs on {num_cores} cores", flush=True)
     if num_cores == 1:
