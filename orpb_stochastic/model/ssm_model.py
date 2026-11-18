@@ -514,9 +514,14 @@ class SSModel:
         return float(np.std([_pmmh_evaluate(chain, theta)[0] for _ in range(reps)]))
 
     def pmmh_summary(self, num_burnin: Optional[int] = None):
-        """Posterior table from post-burn-in draws pooled over chains, with split R-hat.
+        """Posterior table from post-burn-in draws pooled over chains.
 
-        R-hat well above 1.01-1.05 means the chains disagree: run longer, not wider.
+        rhat is the rank-normalized split R-hat of Vehtari et al. (2021): the larger of the bulk
+        R-hat (chains agree on the centre) and the folded R-hat (chains agree on the spread), each
+        on normal scores of the pooled ranks, so one chain far out in a long tail does not
+        dominate it. 'rhat classic' is the split R-hat on the raw values (reported before
+        2026-11-18). ess is the bulk ESS. R-hat above ~1.05 means the chains disagree: run longer,
+        not wider.
         """
         import pandas as pd
         b = self.num_burnin if num_burnin is None else num_burnin
@@ -527,6 +532,36 @@ class SSModel:
         W = split.var(axis=1, ddof=1).mean(axis=0)
         B = half * split.mean(axis=1).var(axis=0, ddof=1)
         rhat = np.sqrt(((half - 1) / half * W + B / half) / W)
+        rhat_classic = rhat
+
+        def z_rank(x):          # [D, n] -> normal scores of the ranks pooled over chains
+            r = ss.rankdata(x.ravel(), method="average").reshape(x.shape)
+            return ss.norm.ppf((r - 0.375) / (x.size + 0.25))
+
+        def split_rhat(x):      # [D, n], one parameter
+            s = np.concatenate([x[:, :half], x[:, half:2 * half]], axis=0)
+            w = s.var(axis=1, ddof=1).mean()
+            return float(np.sqrt(((half - 1) / half * w + s.mean(axis=1).var(ddof=1)) / w))
+
+        def bulk_ess(x):        # [D, n], one parameter; Geyer initial positive sequence
+            s = z_rank(x)
+            s = np.concatenate([s[:, :half], s[:, half:2 * half]], axis=0)
+            m, h = s.shape
+            f = np.fft.rfft(s - s.mean(axis=1, keepdims=True), n=2 * h, axis=1)
+            ac = np.fft.irfft(f * np.conj(f), axis=1)[:, :h] / (h - np.arange(h))
+            w = (ac[:, 0] * h / (h - 1)).mean()
+            var_plus = (h - 1) / h * w + s.mean(axis=1).var(ddof=1)
+            rho = 1 - (w - (ac * (h / (h - 1))).mean(axis=0)) / var_plus
+            tau, t = 1.0, 1
+            while t + 1 < h and rho[t] + rho[t + 1] > 0:
+                tau += 2 * (rho[t] + rho[t + 1])
+                t += 2
+            return float(m * h / tau)
+
+        rhat = np.array([max(split_rhat(z_rank(draws[:, :, j])),
+                             split_rhat(z_rank(np.abs(draws[:, :, j] - np.median(draws[:, :, j])))))
+                         for j in range(p)])
+        ess = np.array([bulk_ess(draws[:, :, j]) for j in range(p)])
         flat = draws.reshape(-1, p)
         prior_sd = np.array([self._prior[k].std() for k in self._theta_to_estimate])
         return pd.DataFrame({
@@ -537,6 +572,8 @@ class SSModel:
             "q95": np.percentile(flat, 95, axis=0),
             "sd / prior sd": flat.std(axis=0) / prior_sd,
             "rhat": rhat,
+            "rhat classic": rhat_classic,
+            "ess": ess,
             "accept": self.accept_chains[:, b + 1:].mean(),
         }, index=self._theta_to_estimate)
 

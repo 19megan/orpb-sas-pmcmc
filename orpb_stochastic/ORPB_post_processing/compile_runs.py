@@ -142,7 +142,10 @@ def summarize(npz_path):
     splits = [rng.permutation(D) for _ in range(SPLITS)]
     for j, name in enumerate(names):
         lab, x = label(name), post[:, :, j]
-        row[f"{lab} rhat"] = _rhat(_z_rank(x))
+        # row[f"{lab} rhat"] = _rhat(_z_rank(x))
+        # rank R-hat (Vehtari et al. 2021): the larger of bulk (centre) and folded (spread), as in
+        # SSModel.pmmh_summary
+        row[f"{lab} rhat"] = max(_rhat(_z_rank(x)), _rhat(_z_rank(np.abs(x - np.median(x)))))
         row[f"{lab} ess"] = _bulk_ess(x)
         if lab in PHYSICAL:
             lo, hi, shape = prior_of(name, cfg)

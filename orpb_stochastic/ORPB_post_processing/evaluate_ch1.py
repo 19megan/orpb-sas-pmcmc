@@ -13,8 +13,9 @@
 #   <scenario>_validation.png           scores vs resolution, one column per validation period
 #   <scenario>_kld.png                  KLD vs resolution per physical parameter; bars span KLD split
 #   <scenario>_cost_tradeoff.png        rmse and crps vs cost (bars: min-max sample price), per period
-#   <scenario>_rhat.png                 parameter R-hat per run; predictive R-hat (--predictive-rhat,
-#                                       from predictive_by_chain.py --out) of runs that fail on parameters
+#   <scenario>_rhat.png                 parameter rank R-hat per run
+#   <scenario>_pred_rhat.png            predictive R-hat (--predictive-rhat, from predictive_by_chain.py
+#                                       --out) of runs that fail on parameters; only if there are any
 #   <scenario>_cost.png, _cost_by_window.png   cost of every design in the cost sheet, run or not
 # crps and cover90 include sigma C out, which in Scenario 2 is the error of a coarse mean: compare
 # them only within one scenario (and output resolution); rmse and bias compare across everything.
@@ -209,42 +210,59 @@ def _by_resolution_panel(ax, d, col, windows, err_lo=None, err_hi=None):
     ax.spines[["top", "right"]].set_visible(False)
 
 
-RHAT_PASS = 1.05   # a run passes when every parameter's rank R-hat is below this
+# RHAT_PASS = 1.05   # a run passes when every parameter's rank R-hat is below this
+# a run passes when its worst parameter rank R-hat (max of bulk and folded), to 2 decimals, is at
+# most this
+# RHAT_PASS = 1.06
+RHAT_PASS = 1.05
 RHAT_PARAMS = PHYSICAL + ["sigma C in", "sigma C out"]
 
 
-def fig_rhat(runs, scen, out):
-    """Rank R-hat per parameter for every run, then the predictive R-hats (predictive_by_chain.py)
-    for the runs that did not pass on parameters: do the chains agree on the prediction anyway?"""
-    windows = windows_in(runs)
-    runs = runs.assign(failed=runs[[f"{p} rhat" for p in RHAT_PARAMS]].max(axis=1) > RHAT_PASS)
-    has_pred = "pred rhat median" in runs
-    pred = runs[runs["failed"]] if has_pred else runs.iloc[:0]
-    panels = [(p, f"{p} rhat", runs, None, None) for p in RHAT_PARAMS]
-    if has_pred:
-        panels += [("prediction\n(median of dates; bar to 95th pct)", "pred rhat median", pred,
-                    "pred rhat median", "pred rhat p95"),
-                   ("per-draw RMSE", "rmse rhat", pred, None, None)]
-    fig, axes = plt.subplots(1, len(panels), figsize=(2.4 * len(panels), 3.2), sharey=True)
-    for k, (ax, (title, col, d, lo, hi)) in enumerate(zip(axes, panels)):
+def failed_rhat(runs):
+    return runs[[f"{p} rhat" for p in RHAT_PARAMS]].max(axis=1).round(2) > RHAT_PASS
+
+
+def _rhat_figure(panels, windows, title, ylabel, path):
+    """One row of by-resolution panels (title, column, rows, bar low, bar high), shared y."""
+    fig, axes = plt.subplots(1, len(panels), figsize=(2.4 * len(panels), 3.2), sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, (t, col, d, lo, hi) in zip(axes, panels):
         ax.axhline(RHAT_PASS, color="#52514e", lw=1, ls="--", zorder=1)
         _by_resolution_panel(ax, d, col, windows, err_lo=lo, err_hi=hi)
-        if k >= len(RHAT_PARAMS):
-            ax.set_facecolor("#f4f3f0")   # predictive panels: only the runs that failed on parameters
-            if d[col].notna().sum() == 0:
-                ax.text(0.5, 0.5, "no failed run\nwith predictive R-hat", transform=ax.transAxes,
-                        ha="center", va="center", fontsize=8, color="#52514e")
-        ax.set_title(title, fontsize=9)
-    axes[0].set_ylabel("Rank R-hat")
+        ax.set_title(t, fontsize=9)
+    axes[0].set_ylabel(ylabel)
     h, lab = axes[0].get_legend_handles_labels()
     fig.legend(h, lab, title="Window", loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False)
-    fig.suptitle(f"{scen}: convergence (dashed: R-hat {RHAT_PASS}; shaded panels: predictive R-hat of "
-                 f"runs with a parameter R-hat above {RHAT_PASS})", fontsize=10)
+    fig.suptitle(title, fontsize=10)
     fig.tight_layout()
-    path = os.path.join(out, f"{scen.replace(' ', '_')}_rhat.png")
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def fig_rhat(runs, scen, out):
+    """Rank R-hat per parameter, every run."""
+    panels = [(p, f"{p} rhat", runs, None, None) for p in RHAT_PARAMS]
+    return _rhat_figure(panels, windows_in(runs),
+                        f"{scen}: parameter convergence (dashed: R-hat {RHAT_PASS})", "Rank R-hat",
+                        os.path.join(out, f"{scen.replace(' ', '_')}_rhat.png"))
+
+
+def fig_pred_rhat(runs, scen, out):
+    """Predictive R-hats (predictive_by_chain.py --out) of the runs that did not pass on parameters:
+    do the chains agree on the prediction anyway? None if there are no such values."""
+    if "pred rhat median" not in runs:
+        return None
+    pred = runs[failed_rhat(runs) & runs["pred rhat median"].notna()]
+    if pred.empty:
+        return None
+    panels = [("prediction at each scored date\n(point: median; bar: to 95th pct)", "pred rhat median",
+               pred, "pred rhat median", "pred rhat p95"),
+              ("per-draw RMSE", "rmse rhat", pred, None, None)]
+    return _rhat_figure(panels, windows_in(runs),
+                        f"{scen}: predictive convergence of runs with a parameter R-hat above "
+                        f"{RHAT_PASS} (dashed: {RHAT_PASS})", "R-hat",
+                        os.path.join(out, f"{scen.replace(' ', '_')}_pred_rhat.png"))
 
 
 def fig_rmse(df, scen, out):
@@ -489,10 +507,12 @@ def main():
         #           fig_cost(d, scen, args.out_dir), fig_cost_kld(d, scen, args.out_dir),
         #           fig_grids(d, scen, args.out_dir)):
         for f in (fig_validation(d, scen, args.out_dir), fig_kld(runs, scen, args.out_dir),
-                  fig_rhat(runs, scen, args.out_dir), fig_rmse(d, scen, args.out_dir),
+                  fig_rhat(runs, scen, args.out_dir), fig_pred_rhat(runs, scen, args.out_dir),
+                  fig_rmse(d, scen, args.out_dir),
                   fig_cost(d, scen, args.out_dir), fig_cost_kld(d, scen, args.out_dir),
                   fig_grids(d, scen, args.out_dir)):
-            print(f"[info] wrote {f}")
+            if f:
+                print(f"[info] wrote {f}")
     # cost only: every design in the cost sheet, whether or not it has a validated run
     cost = load_cost(args)
     for scen in sorted(cost["scenario"].unique()):
