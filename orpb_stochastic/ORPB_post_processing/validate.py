@@ -1,5 +1,14 @@
 # Out-of-sample validation of finished PMMH runs on one common set of held-out observations.
 #
+# Input-resolution version: each run is driven by the precipitation 18O at its OWN sampling
+# resolution (run_config data.resolution; the composite value of each sampling period on every
+# day of it, as in calibration), and still scored on the daily stream isotopes. So scores show how
+# well each sampling design constrains transport AND predicts the stream from inputs sampled the
+# same way. Scenario 2 runs (coarsened stream) are driven by the same precipitation file as the
+# scenario 1 run of that resolution, which carries the daily stream values. The daily-input
+# version, isolating the calibrated SAS model alone, is validate_SAS_models.py.
+# Everything else below is unchanged from that version (same frame, spinup, draws and scores).
+#
 # Every run, whatever its window, resolution or scenario, is scored on the same stream
 # observations (VALIDATION_PERIODS in ORPB_cases.py): 2014 Jul-Dec, which lies in no
 # calibration window, and the HOLDOUT_MONTHS that load_data masks out of every calibration
@@ -7,8 +16,8 @@
 #
 # What it does, per run:
 #   - takes post-burn-in posterior draws pooled over chains (as pmmh_summary does)
-#   - runs each draw forward over 2014-2018 on ONE common validation frame: the daily
-#     precipitation input and native daily stream isotopes, with 2014 looped once before it as
+#   - runs each draw forward over 2014-2018 on ONE common validation frame: the precipitation
+#     input at the run's resolution and native daily stream isotopes, with 2014 looped once before it as
 #     spinup (fluxes AND isotopes -- this is validation forcing, identical for every run) so
 #     every scored observation sees a full year of resolved input, like calibration
 #   - uses the calibrated model exactly: the same convolution as transition_model, the same
@@ -37,7 +46,6 @@ import sys
 from types import SimpleNamespace
 
 script_folder = os.path.dirname(os.path.abspath(__file__))
-# sys.path.insert(0, script_folder)
 # the runner and ORPB_cases stay with the run scripts in tests_mesas
 sys.path.insert(0, os.path.join(os.path.dirname(script_folder), "tests_mesas"))
 import numpy as np   # noqa: E402
@@ -49,21 +57,44 @@ from ORPB_cases import VALIDATION_PERIODS, HOLDOUT_MONTHS   # noqa: E402
 FLUX, SOL, OBS = "discharge (mm/hr)", "precip 18O", "ORPB 18O"
 LOOP_YEAR, FRAME_END = "2014", "2018-12-31"   # 2019 has almost no stream isotopes
 MAX_AGE = 365   # one year of daily steps, the calibration max_age
+# one y-range for every panel of every run's plot (and in validate_SAS_models.py), so plots compare
+# directly; covers all held-out observations (to the July 2018 storm spike at -3.3) and the 5-95%
+# bands of the runs so far (down to about -11 for the 6M cold runs); single-day dips below clip
+YLIM = (-11.5, -3.0)
+# run_config data.resolution code -> resolution name in the data file names
+RES_NAMES = {"D": "daily", "W": "weekly", "2W": "biweekly", "ME": "monthly"}
 
 
-def build_validation_interface(case_name, data_root):
-    """The common validation frame and a model interface on it for one SAS case."""
-    raw = pd.read_csv(os.path.join(data_root, "ORPB_isotope_data_precip 18O_daily.csv"),
+def validation_frame(data_root, resolution="daily"):
+    """The validation frame from the scenario 1 file of one input resolution (daily stream)."""
+    raw = pd.read_csv(os.path.join(data_root, f"ORPB_isotope_data_precip 18O_{resolution}.csv"),
                       index_col=0, parse_dates=[0])
     raw["precip 18O"] = raw["mean_c"]
     loop = raw.loc[LOOP_YEAR].copy()
     loop.index = loop.index - pd.DateOffset(years=1)
     loop[OBS] = np.nan   # spinup is never scored
-    df = runner.prepare_frame(pd.concat([loop, raw.loc[:FRAME_END]]))
+    # prepare_frame back-fills each sampling period's composite value over the days of it
+    return runner.prepare_frame(pd.concat([loop, raw.loc[:FRAME_END]]))
+
+
+def build_validation_interface(case_name, data_root):
+    """The common validation frame and a model interface on it for one SAS case."""
+    # fluxes and stream isotopes are the same in every resolution's file, so one daily frame and
+    # interface serve all runs; only the precipitation input (validation_input) changes
+    df = validation_frame(data_root)
     args = SimpleNamespace(case_name=case_name, num_particles=1, update_theta_dist=False,
                            sampler="pmmh")
     mi, _, _ = runner.build_model_interface(args, df, MAX_AGE)
     return mi, df
+
+
+def validation_input(data_root, res_code, df):
+    """Precipitation 18O at one sampling resolution, on the validation frame df."""
+    f = validation_frame(data_root, RES_NAMES[res_code])
+    if not (f.index.equals(df.index) and np.allclose(f[FLUX], df[FLUX])
+            and np.allclose(f[OBS], df[OBS], equal_nan=True)):
+        raise ValueError(f"{RES_NAMES[res_code]} file: fluxes or stream isotopes differ from daily")
+    return f[SOL].to_numpy()
 
 
 def predict(mi, cin):
@@ -124,6 +155,7 @@ def plot_run(tag, df, preds, ens, point, rows, plot_dir):
         ax.xaxis.set_major_locator(mdates.MonthLocator() if k == 0 else mdates.DayLocator(bymonthday=[1, 8, 15, 22]))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y" if k == 0 else "%d %b"))
         ax.tick_params(axis="x", labelsize=8)
+        ax.set_ylim(*YLIM)
         ax.grid(axis="y", color="#e5e4e0", lw=0.8)
         ax.spines[["top", "right"]].set_visible(False)
         if k <= 1:
@@ -144,7 +176,6 @@ def plot_run(tag, df, preds, ens, point, rows, plot_dir):
 _INTERFACES = {}   # one validation interface per SAS case, per process
 
 
-# def validate_run(npz_path, data_root, num_draws, seed):
 def validate_run(npz_path, data_root, num_draws, seed, plot_dir=None):
     # same seed for every run: common draws of the predictive noise, so score differences
     # between runs are not partly sampling noise
@@ -180,11 +211,15 @@ def validate_run(npz_path, data_root, num_draws, seed, plot_dir=None):
     if excluded:
         print(f"[info] {tag}: leaving out chains {excluded} (run_config excluded_chains)", flush=True)
     kept = np.delete(pm["theta_chains"], excluded, axis=0)
-    # flat = pm["theta_chains"][:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
     flat = kept[:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
     draws = flat[rng.choice(len(flat), size=min(num_draws, len(flat)), replace=False)]
 
-    cin = df[SOL].to_numpy()
+    # the run's own input resolution (scenario 2 too: its precip file is the scenario 1 one);
+    # cached per process next to the interfaces
+    res = cfg["data"]["resolution"]
+    if ("input", res) not in interfaces:
+        interfaces[("input", res)] = validation_input(data_root, res, df)
+    cin = interfaces[("input", res)]
     preds, sigmas = [], []
     for theta in draws:
         mi.update_theta(theta)
@@ -208,6 +243,7 @@ def validate_run(npz_path, data_root, num_draws, seed, plot_dir=None):
 
     meta = {"tag": tag, "case": case, "source": cfg["data"]["source"],
             "coarsen_output": extra.get("coarsen_output", False),
+            "input_resolution": RES_NAMES[res],
             "date_start": cfg["data"]["date_start"], "date_end": cfg["data"]["date_end"],
             "num_draws": len(draws), "excluded_chains": " ".join(map(str, excluded))}
     print(f"[done] {tag}: mean-of-periods rmse {rows[-1]['rmse']:.3f}, crps {rows[-1]['crps']:.3f}",
@@ -238,7 +274,6 @@ def main():
     paths = sorted({f for pattern in args.runs for f in glob.glob(pattern)})
     if not paths:
         raise SystemExit(f"No files match {args.runs}")
-    # jobs = [(path, args.data_root, args.num_draws, args.seed) for path in paths]
     jobs = [(path, args.data_root, args.num_draws, args.seed, args.plot_dir) for path in paths]
     num_cores = max(1, min(args.num_cores, len(paths)))
     print(f"[info] {len(paths)} runs on {num_cores} cores", flush=True)

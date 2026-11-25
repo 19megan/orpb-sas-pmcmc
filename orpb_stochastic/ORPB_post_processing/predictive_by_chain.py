@@ -1,13 +1,16 @@
 # Usage: python predictive_by_chain.py <pmmh npz> [--data-root DIR] [--per-chain 20] [--num-cores K]
 #        [--drop C ...] [--out predictive_rhat.csv]
 # Do the chains agree on what validate.py scores, even where they disagree on parameters?
-# Same frame, prediction and scores as validate.py (imported, not copied). No run_config needed.
+# Same frame, prediction and scores as validate.py (imported, not copied), including its input:
+# the precipitation 18O at the run's own sampling resolution (run_config data.resolution, from the
+# run_config_<tag>.json next to the npz). The daily-input version is predictive_by_chain_SM.py;
+# give each its own --out CSV, since rows are keyed by tag.
 # Chains are solved in parallel, one per process (default: the Slurm allocation), with a line per
 # chain. --out adds this run's predictive R-hats as one row (keyed by tag; a rerun replaces the
 # row) to a CSV that evaluate_ch1.py reads with --predictive-rhat.
 # --tests-dir is only needed if this script is not next to validate.py (validate.py itself finds
 # tests_mesas).
-import argparse, os, sys, time
+import argparse, json, os, sys, time
 import numpy as np
 
 _mi = {}
@@ -19,13 +22,12 @@ def setup(tests_dir):
 
 
 def solve_chain(job):
-    tests_dir, case, data_root, thetas = job
+    tests_dir, case, data_root, thetas, cin = job   # cin: the run's input, from main
     setup(tests_dir)
     import validate as V
     if "mi" not in _mi:
         _mi["mi"], _mi["df"] = V.build_validation_interface(case, data_root)
-    mi, df = _mi["mi"], _mi["df"]
-    cin = df[V.SOL].to_numpy()
+    mi = _mi["mi"]
     preds, sig = [], []
     for th in thetas:
         mi.update_theta(th)
@@ -67,7 +69,11 @@ def main():
     if [str(x) for x in pm["theta_names"]] != list(mi._theta_to_estimate):
         raise ValueError("parameters do not match the case")
     y_all = df[V.OBS].to_numpy()
-    jobs = [(args.tests_dir, args.case, args.data_root, post[d, steps]) for d in range(D)]
+    with open(os.path.join(os.path.dirname(os.path.abspath(args.npz)), f"run_config_{tag}.json")) as f:
+        res = json.load(f)["data"]["resolution"]
+    print(f"[info] input resolution {V.RES_NAMES[res]}", flush=True)
+    cin = V.validation_input(args.data_root, res, df)
+    jobs = [(args.tests_dir, args.case, args.data_root, post[d, steps], cin) for d in range(D)]
     print(f"[info] {D} chains x {len(steps)} draws on {args.num_cores} cores", flush=True)
     t0 = time.time()
     out = [None] * D
@@ -118,8 +124,6 @@ def main():
     # one RMSE per draw, each period counted equally
     draw_rmse = np.mean([np.sqrt(((preds[:, :, s] - y_all[s]) ** 2).mean(axis=2)) for s in sels.values()], axis=0)
     scored = np.any(list(sels.values()), axis=0)
-    # r_pt = rhat(preds[:, :, scored])
-    # r_rmse = float(rhat(draw_rmse))
     r_pt = rank_rhat(preds[:, :, scored])
     r_rmse = float(rank_rhat(draw_rmse))
     r_pt_classic = rhat(preds[:, :, scored])
@@ -154,13 +158,6 @@ def main():
         print(f"[info] wrote {tag} to {args.out}", flush=True)
 
     print("\nall chains:", score(np.arange(D)).round(3).to_dict())
-    # (moved above the CSV row)
-    # rng = np.random.default_rng(1)
-    # diffs = []
-    # for _ in range(20):
-    #     o = rng.permutation(D)
-    #     diffs.append((score(o[:D // 2]) - score(o[D // 2:])).abs())
-    # diffs = pd.DataFrame(diffs)
     print("difference between two random halves of the chains (median, max of 20 splits):")
     for c in diffs:
         print(f"  {c:8s} {diffs[c].median():.4f}  {diffs[c].max():.4f}")

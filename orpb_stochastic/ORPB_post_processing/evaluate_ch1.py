@@ -36,7 +36,7 @@ import numpy as np   # noqa: E402
 import pandas as pd   # noqa: E402
 
 RES_ORDER = ["daily", "weekly", "biweekly", "monthly"]
-RES_TICKS = ["D", "W", "2W", "ME"]
+RES_TICKS = ["D*", "W", "2W", "M"]
 WINDOW_ORDER = ["3M_winter", "3M_spring", "3M_summer", "3M_fall", "6M_cold", "6M_warm",
                 "1Y_avg", "1Y_dry", "2Y", "4Y"]
 # colour = record length (fixed categorical order), marker / fill = replicate window of that length
@@ -290,13 +290,15 @@ def fig_cost_by_res(cost, scen, out):
     # runs, windows = df.drop_duplicates("tag"), windows_in(df)
     runs, windows = cost, windows_in(cost)
     fig, ax = plt.subplots(figsize=(4.5, 3.5))
-    _by_resolution_panel(ax, runs, "Average cost", windows, err_lo="Min cost", err_hi="Max cost")
+    _by_resolution_panel(ax, runs, "Average cost", windows) #, err_lo="Min cost", err_hi="Max cost")
+    ax.set_yscale("log")
     ax.set_ylabel("Cost (USD)")
     ax.set_ylim(bottom=0)
     ax.yaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:,.0f}"))
     h, lab = ax.get_legend_handles_labels()
     fig.legend(h, lab, title="Window", loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False)
-    fig.suptitle(f"{scen}: sampling cost\n(point: average sample price; bars: min-max price)", fontsize=11)
+    fig.suptitle(f"{scen}: average sampling cost", #\n(point: average sample price; bars: min-max price)", 
+                 fontsize=11)
     fig.tight_layout()
     path = os.path.join(out, f"{scen.replace(' ', '_')}_cost.png")
     fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -318,11 +320,12 @@ def fig_cost_by_window(cost, scen, out):
     for k, (res, tick) in enumerate(zip(RES_ORDER, RES_TICKS)):
         d = cost[cost["Resolution"] == res].set_index("Window").reindex(windows)
         c = RES_COLORS[res]
-        ax.errorbar(x + off[k], d["Average cost"],
-                    yerr=[d["Average cost"] - d["Min cost"], d["Max cost"] - d["Average cost"]],
-                    color=c, alpha=0.35, elinewidth=1, capsize=0, ls="none", zorder=2)
+        # ax.errorbar(x + off[k], d["Average cost"],
+                    # yerr=[d["Average cost"] - d["Min cost"], d["Max cost"] - d["Average cost"]],
+                    # color=c, alpha=0.35, elinewidth=1, capsize=0, ls="none", zorder=2)
         ax.plot(x + off[k], d["Average cost"], color=c, lw=1.5, marker=RES_MARKERS[res], ms=7,
                 label=tick, zorder=3)
+    ax.set_yscale("log")
     ax.set_xticks(x, [w.replace("_", " ") for w in windows], rotation=45, ha="right")
     ax.set_ylabel("Cost (USD)")
     ax.set_ylim(bottom=0)
@@ -330,7 +333,7 @@ def fig_cost_by_window(cost, scen, out):
     ax.grid(axis="y", color="#e5e4e0", lw=0.8)
     ax.spines[["top", "right"]].set_visible(False)
     fig.legend(title="Resolution", loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False)
-    fig.suptitle(f"{scen}: sampling cost by window\n(point: average sample price; bars: min-max price)",
+    fig.suptitle(f"{scen}: average sampling cost by window", #\n(point: average sample price; bars: min-max price)",
                  fontsize=11)
     fig.tight_layout()
     path = os.path.join(out, f"{scen.replace(' ', '_')}_cost_by_window.png")
@@ -354,10 +357,10 @@ def fig_cost(df, scen, out):
                 c, _, fill = style(r["Window"])
                 # the min-max price range is the same ratio for every design, so it is drawn once, in
                 # the last column, rather than repeated in every period
-                if j == len(periods) - 1:
-                    ax.errorbar(r["Average cost"], r[metric],
-                                xerr=[[r["Average cost"] - r["Min cost"]], [r["Max cost"] - r["Average cost"]]],
-                                color=c, alpha=0.35, lw=1, capsize=0, zorder=2)
+                # if j == len(periods) - 1:
+                    # ax.errorbar(r["Average cost"], r[metric],
+                                # xerr=[[r["Average cost"] - r["Min cost"]], [r["Max cost"] - r["Average cost"]]],
+                                # color=c, alpha=0.35, lw=1, capsize=0, zorder=2)
                 # ax.plot(r["Average cost"], r[metric], marker=res_markers[r["Resolution"]], ms=8, color=c,
                 #         markeredgecolor="#fcfcfb", markeredgewidth=1, ls="none", zorder=3)
                 ax.plot(r["Average cost"], r[metric], marker=res_markers[r["Resolution"]], ms=8, color=c,
@@ -380,8 +383,8 @@ def fig_cost(df, scen, out):
                bbox_to_anchor=(1.0, 0.5), frameon=False)
     # fig.suptitle(f"{scen}: accuracy vs cost (point: average sample price; bar: min-max price)",
     #              fontsize=11)
-    fig.suptitle(f"{scen}: accuracy vs cost (point: average sample price; bars in last column: "
-                 f"min-max price)", fontsize=11)
+    fig.suptitle(f"{scen}: accuracy vs cost (point: average sample price)", #; bars in last column: min-max price)",
+                  fontsize=11)
     fig.tight_layout()
     path = os.path.join(out, f"{scen.replace(' ', '_')}_cost_tradeoff.png")
     fig.savefig(path, dpi=200, bbox_inches="tight")

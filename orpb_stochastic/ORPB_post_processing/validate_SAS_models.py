@@ -1,0 +1,263 @@
+# Out-of-sample validation of finished PMMH runs on one common set of held-out observations.
+#
+# SAS-model version ("SM"): every run is driven by the same DAILY precipitation input, so score
+# differences come only from the calibrated SAS model (its parameters). validate.py instead drives
+# each run with the precipitation input at its own sampling resolution. Plots are saved as
+# validation_SM_<tag>.png.
+#
+# Every run, whatever its window, resolution or scenario, is scored on the same stream
+# observations (VALIDATION_PERIODS in ORPB_cases.py): 2014 Jul-Dec, which lies in no
+# calibration window, and the HOLDOUT_MONTHS that load_data masks out of every calibration
+# dataset. So differences in score come only from the parameters each sampling design learned.
+#
+# What it does, per run:
+#   - takes post-burn-in posterior draws pooled over chains (as pmmh_summary does)
+#   - runs each draw forward over 2014-2018 on ONE common validation frame: the daily
+#     precipitation input and native daily stream isotopes, with 2014 looped once before it as
+#     spinup (fluxes AND isotopes -- this is validation forcing, identical for every run) so
+#     every scored observation sees a full year of resolved input, like calibration
+#   - uses the calibrated model exactly: the same convolution as transition_model, the same
+#     max_age (one year), each draw's own C_old for older water. The observed input is used
+#     as is (no sigma C in noise): input uncertainty is resolution-specific, so leaving it out
+#     keeps every run on the same footing. Predictive draws add N(0, sigma C out).
+#
+# Scores per validation period, and their mean ("mean of periods", each period weighted equally):
+#   rmse, bias  -- of the pointwise posterior-median prediction; comparable across all runs
+#   crps, cover90 -- of the predictive distribution. These include sigma C out, which in
+#                 scenario 2 is the error of a coarse MEAN and so too small for daily data:
+#                 compare them only between runs with the same output resolution.
+#
+# Usage:
+#   python validate_SAS_models.py --runs <result_root>/pmmh_*.npz --out <result_root>/validation_scores_SM.csv
+#   (each pmmh_<tag>.npz needs its run_config_<tag>.json alongside)
+#    
+#   Also can use slurm_ORPB_validate.sh to run on a cluster, with --runs and --out passed through.
+#
+# Created on: 2026-10-28
+import argparse
+import glob
+import json
+import os
+import sys
+from types import SimpleNamespace
+
+script_folder = os.path.dirname(os.path.abspath(__file__))
+# the runner and ORPB_cases stay with the run scripts in tests_mesas
+sys.path.insert(0, os.path.join(os.path.dirname(script_folder), "tests_mesas"))
+import numpy as np   # noqa: E402
+import pandas as pd   # noqa: E402
+
+import ORPB_pmcmc_script_parallel as runner   # noqa: E402
+from ORPB_cases import VALIDATION_PERIODS, HOLDOUT_MONTHS   # noqa: E402
+
+FLUX, SOL, OBS = "discharge (mm/hr)", "precip 18O", "ORPB 18O"
+LOOP_YEAR, FRAME_END = "2014", "2018-12-31"   # 2019 has almost no stream isotopes
+MAX_AGE = 365   # one year of daily steps, the calibration max_age
+# one y-range for every panel of every run's plot (and in validate.py), so plots compare directly;
+# covers all held-out observations (to the July 2018 storm spike at -3.3) and the 5-95% bands of
+# the runs so far (down to about -11 for the 6M cold runs); single-day dips below clip
+YLIM = (-11.5, -3.0)
+
+
+def build_validation_interface(case_name, data_root):
+    """The common validation frame and a model interface on it for one SAS case."""
+    raw = pd.read_csv(os.path.join(data_root, "ORPB_isotope_data_precip 18O_daily.csv"),
+                      index_col=0, parse_dates=[0])
+    raw["precip 18O"] = raw["mean_c"]
+    loop = raw.loc[LOOP_YEAR].copy()
+    loop.index = loop.index - pd.DateOffset(years=1)
+    loop[OBS] = np.nan   # spinup is never scored
+    df = runner.prepare_frame(pd.concat([loop, raw.loc[:FRAME_END]]))
+    args = SimpleNamespace(case_name=case_name, num_particles=1, update_theta_dist=False,
+                           sampler="pmmh")
+    mi, _, _ = runner.build_model_interface(args, df, MAX_AGE)
+    return mi, df
+
+
+def predict(mi, cin):
+    """C_Q for the interface's current theta and a deterministic input, as transition_model."""
+    W = mi._conv_weights[FLUX][SOL]   # [max_age, T]
+    max_age = W.shape[0]
+    # row t holds cin[t], cin[t-1], ..., cin[t-max_age+1]; the zero padding has zero weight
+    C_J = np.lib.stride_tricks.sliding_window_view(
+        np.concatenate([np.zeros(max_age - 1), cin]), max_age)[:, ::-1]
+    return np.einsum("ta,at->t", C_J, W) + mi.theta.initial_state[0] * (1.0 - mi._P_resolved[FLUX])
+
+
+def scores(ens, point, y):
+    """ens [S, n] predictive draws, point [n] median prediction, y [n] observations."""
+    S = ens.shape[0]
+    srt = np.sort(ens, axis=0)
+    # ensemble CRPS: E|X - y| - E|X - X'| / 2, the second term from the sorted draws
+    crps = (np.abs(ens - y).mean(axis=0)
+            - ((2 * np.arange(1, S + 1) - S - 1)[:, None] * srt).sum(axis=0) / S ** 2)
+    lo, hi = np.percentile(ens, [5, 95], axis=0)
+    return {"n_obs": y.size,
+            "rmse": float(np.sqrt(np.mean((point - y) ** 2))),
+            "bias": float(np.mean(point - y)),
+            "crps": float(crps.mean()),
+            "cover90": float(np.mean((y >= lo) & (y <= hi)))}
+
+
+def plot_run(tag, df, preds, ens, point, rows, plot_dir):
+    """Observed vs predicted stream 18O in each validation period, from the same draws as the
+    scores. Dark band: 5-95% of the model predictions (parameter uncertainty); light band: 5-95%
+    of the predictive draws (adds sigma C out; the band cover90 counts)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    y_all = df[OBS].to_numpy()
+    p_lo, p_hi = np.percentile(preds, [5, 95], axis=0)
+    e_lo, e_hi = np.percentile(ens, [5, 95], axis=0)
+    score = {r["period"]: r for r in rows}
+    periods = list(VALIDATION_PERIODS.items())
+    # the long period across the top, the single held-out months below
+    fig = plt.figure(figsize=(3.2 * max(len(periods) - 1, 1), 6.4))
+    gs = fig.add_gridspec(2, max(len(periods) - 1, 1))
+    axes = [fig.add_subplot(gs[0, :])] + [fig.add_subplot(gs[1, k]) for k in range(len(periods) - 1)]
+    for k, (ax, (period, (start, end))) in enumerate(zip(axes, periods)):
+        sel = df.index.isin(df.loc[start:end].index)
+        t = df.index[sel]
+        ax.fill_between(t, e_lo[sel], e_hi[sel], color="#cde2fb", lw=0,
+                        label="5-95% predictive (with sigma C out)")
+        ax.fill_between(t, p_lo[sel], p_hi[sel], color="#86b6ef", lw=0,
+                        label="5-95% model (parameters)")
+        ax.plot(t, point[sel], color="#1c5cab", lw=1.5, label="median prediction")
+        ax.plot(t, y_all[sel], "o", color="#0b0b0b", ms=3, label="observed")
+        s = score[period]
+        ax.set_title(f"{period} (n = {s['n_obs']})\nRMSE {s['rmse']:.2f}, bias {s['bias']:+.2f}, "
+                     f"cover90 {s['cover90']:.2f}", fontsize=9)
+        ax.xaxis.set_major_locator(mdates.MonthLocator() if k == 0 else mdates.DayLocator(bymonthday=[1, 8, 15, 22]))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y" if k == 0 else "%d %b"))
+        ax.tick_params(axis="x", labelsize=8)
+        ax.set_ylim(*YLIM)
+        ax.grid(axis="y", color="#e5e4e0", lw=0.8)
+        ax.spines[["top", "right"]].set_visible(False)
+        if k <= 1:
+            ax.set_ylabel("Stream 18O (‰)")
+    h, lab = axes[0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    m = score["mean of periods"]
+    fig.suptitle(f"{tag}\nmean of periods: RMSE {m['rmse']:.2f}, bias {m['bias']:+.2f}, "
+                 f"cover90 {m['cover90']:.2f}", fontsize=10)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    os.makedirs(plot_dir, exist_ok=True)
+    path = os.path.join(plot_dir, f"validation_SM_{tag}.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+_INTERFACES = {}   # one validation interface per SAS case, per process
+
+
+def validate_run(npz_path, data_root, num_draws, seed, plot_dir=None):
+    # same seed for every run: common draws of the predictive noise, so score differences
+    # between runs are not partly sampling noise
+    rng = np.random.default_rng(seed)
+    interfaces = _INTERFACES
+    tag = os.path.basename(npz_path)[len("pmmh_"):-len(".npz")]
+    with open(os.path.join(os.path.dirname(npz_path), f"run_config_{tag}.json")) as f:
+        cfg = json.load(f)
+    extra = cfg["metadata"]["extra"]
+    if extra.get("holdout_months") != HOLDOUT_MONTHS or extra.get("spinup") != "isoscape":
+        print(f"[skip] {tag}: calibrated before the held-out months were masked (or with "
+              f"another spinup), so its validation scores would be partly in-sample", flush=True)
+        return []
+    # runs from before the spinup inputs were taken as known have no key, and had sigma C in
+    # noise on the isoscape values
+    if extra.get("spinup_input_noise", True):
+        print(f"[skip] {tag}: calibrated with sigma C in noise on the spinup isoscape inputs",
+              flush=True)
+        return []
+
+    case = cfg["case"]["name"]
+    if case not in interfaces:
+        interfaces[case] = build_validation_interface(case, data_root)
+    mi, df = interfaces[case]
+
+    pm = np.load(npz_path)
+    names = [str(n) for n in pm["theta_names"]]
+    if names != list(mi._theta_to_estimate):
+        raise ValueError(f"{tag}: parameters {names} do not match case {case}")
+    # chains flagged by stuck_check.py (stuck on a filter overestimate) are left out, as recorded
+    # in the run_config: "excluded_chains" in metadata.extra
+    excluded = extra.get("excluded_chains", [])
+    if excluded:
+        print(f"[info] {tag}: leaving out chains {excluded} (run_config excluded_chains)", flush=True)
+    kept = np.delete(pm["theta_chains"], excluded, axis=0)
+    flat = kept[:, int(pm["num_burnin"]) + 1:, :].reshape(-1, len(names))
+    draws = flat[rng.choice(len(flat), size=min(num_draws, len(flat)), replace=False)]
+
+    cin = df[SOL].to_numpy()
+    preds, sigmas = [], []
+    for theta in draws:
+        mi.update_theta(theta)
+        preds.append(predict(mi, cin))
+        sigmas.append(mi.theta.observation_model[0])
+    preds = np.array(preds)                                    # [S, T]
+    ens = preds + rng.normal(size=preds.shape) * np.array(sigmas)[:, None]
+    point = np.median(preds, axis=0)
+
+    y_all = df[OBS].to_numpy()
+    rows = []
+    for period, (start, end) in VALIDATION_PERIODS.items():
+        # label slicing is inclusive and reads '2015-04' as the whole month
+        sel = df.index.isin(df.loc[start:end].index) & ~np.isnan(y_all)
+        rows.append({"period": period, **scores(ens[:, sel], point[sel], y_all[sel])})
+    # each period (season / flow condition) counts equally; pooling the observations would
+    # let 2014 Jul-Dec, about two thirds of them, dominate
+    summary = pd.DataFrame(rows).drop(columns="period").mean()
+    summary["n_obs"] = sum(r["n_obs"] for r in rows)
+    rows.append({"period": "mean of periods", **summary.to_dict()})
+
+    meta = {"tag": tag, "case": case, "source": cfg["data"]["source"],
+            "coarsen_output": extra.get("coarsen_output", False),
+            "date_start": cfg["data"]["date_start"], "date_end": cfg["data"]["date_end"],
+            "num_draws": len(draws), "excluded_chains": " ".join(map(str, excluded))}
+    print(f"[done] {tag}: mean-of-periods rmse {rows[-1]['rmse']:.3f}, crps {rows[-1]['crps']:.3f}",
+          flush=True)
+    if plot_dir:
+        print(f"[plot] {plot_run(tag, df, preds, ens, point, rows, plot_dir)}", flush=True)
+    return [{**meta, **r} for r in rows]
+
+
+def main():
+    p = argparse.ArgumentParser(description="Score finished PMMH runs on the held-out data")
+    p.add_argument("--runs", nargs="+", required=True,
+                   help="pmmh_<tag>.npz files (globs allowed), each with run_config_<tag>.json")
+    p.add_argument("--data-root", default=os.environ.get(
+        "MESAS_DATA_ROOT", "/Users/simon/Desktop/ORPB_resolution_datasets"))
+    p.add_argument("--out", required=True, help="CSV of scores, one row per run and period")
+    p.add_argument("--num-draws", type=int, default=200,
+                   help="posterior draws per run (each is one mesas solve)")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--num-cores", type=int,
+                   default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)),
+                   help="runs validated in parallel, one per process (default: SLURM allocation)")
+    p.add_argument("--plot-dir", default=None,
+                   help="also save an observed vs predicted figure per run here, e.g. "
+                        "<result_root>/ORPB_validation_plots (same draws as the scores)")
+    args = p.parse_args()
+
+    paths = sorted({f for pattern in args.runs for f in glob.glob(pattern)})
+    if not paths:
+        raise SystemExit(f"No files match {args.runs}")
+    jobs = [(path, args.data_root, args.num_draws, args.seed, args.plot_dir) for path in paths]
+    num_cores = max(1, min(args.num_cores, len(paths)))
+    print(f"[info] {len(paths)} runs on {num_cores} cores", flush=True)
+    if num_cores == 1:
+        results = [validate_run(*job) for job in jobs]
+    else:
+        import multiprocessing as mp
+        with mp.Pool(num_cores) as pool:
+            results = pool.starmap(validate_run, jobs)
+    rows = [row for result in results for row in result]
+    pd.DataFrame(rows).to_csv(args.out, index=False)
+    print(f"[info] wrote {args.out} ({len(rows)} rows)", flush=True)
+
+
+if __name__ == "__main__":
+    main()
