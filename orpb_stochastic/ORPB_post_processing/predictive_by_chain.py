@@ -129,6 +129,15 @@ def main():
     print(f"Rank R-hat of per-draw RMSE: {r_rmse:.2f}")
     print(f"(classic: median {np.median(r_pt_classic):.2f}, 95th pct {np.percentile(r_pt_classic, 95):.2f}, max {r_pt_classic.max():.2f}, RMSE {r_rmse_classic:.2f})")
 
+    # score difference between two random halves of the chains, 20 splits; computed before the CSV
+    # row so its largest value per score ("<score> split") can go in it
+    rng = np.random.default_rng(1)
+    diffs = []
+    for _ in range(20):
+        o = rng.permutation(D)
+        diffs.append((score(o[:D // 2]) - score(o[D // 2:])).abs())
+    diffs = pd.DataFrame(diffs)
+
     if args.out:
         row = pd.DataFrame([{"tag": tag, "pred chains": D, "pred draws per chain": len(steps),
                              "pred dropped chains": " ".join(map(str, args.drop)),
@@ -136,7 +145,8 @@ def main():
                              "pred rhat p95": float(np.percentile(r_pt, 95)),
                              "pred rhat max": float(r_pt.max()), "rmse rhat": r_rmse,
                              "pred rhat classic median": float(np.median(r_pt_classic)),
-                             "rmse rhat classic": r_rmse_classic}])
+                             "rmse rhat classic": r_rmse_classic,
+                             **{f"{c} split": float(diffs[c].max()) for c in diffs}}])
         if os.path.exists(args.out):
             old = pd.read_csv(args.out)
             row = pd.concat([old[old["tag"] != tag], row], ignore_index=True)
@@ -144,12 +154,13 @@ def main():
         print(f"[info] wrote {tag} to {args.out}", flush=True)
 
     print("\nall chains:", score(np.arange(D)).round(3).to_dict())
-    rng = np.random.default_rng(1)
-    diffs = []
-    for _ in range(20):
-        o = rng.permutation(D)
-        diffs.append((score(o[:D // 2]) - score(o[D // 2:])).abs())
-    diffs = pd.DataFrame(diffs)
+    # (moved above the CSV row)
+    # rng = np.random.default_rng(1)
+    # diffs = []
+    # for _ in range(20):
+    #     o = rng.permutation(D)
+    #     diffs.append((score(o[:D // 2]) - score(o[D // 2:])).abs())
+    # diffs = pd.DataFrame(diffs)
     print("difference between two random halves of the chains (median, max of 20 splits):")
     for c in diffs:
         print(f"  {c:8s} {diffs[c].median():.4f}  {diffs[c].max():.4f}")
