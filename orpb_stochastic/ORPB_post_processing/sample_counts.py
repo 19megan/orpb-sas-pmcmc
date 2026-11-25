@@ -62,6 +62,7 @@ def main():
                 mask_holdout(w, res if coarsen else "daily")
                 rows.append({"Scenario": scenario, "Resolution": res, "Window": window,
                              "Start": start, "End": end, "Days": len(pd.date_range(start, end)),
+                             "Rain days": int(w.loc[w['rainfall (mm/hr)'] > 0, 'rainfall (mm/hr)'].notna().sum()),
                              "Precip samples": int(w["mean_c"].notna().sum()),
                              "Stream samples": n_stream,
                              "Stream samples calibrated": int(w["ORPB 18O"].notna().sum())})

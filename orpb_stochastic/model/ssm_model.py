@@ -529,14 +529,14 @@ class SSModel:
         D, n, p = draws.shape
         half = n // 2
         split = np.concatenate([draws[:, :half], draws[:, half:2 * half]], axis=0)
-        W = split.var(axis=1, ddof=1).mean(axis=0)
-        B = half * split.mean(axis=1).var(axis=0, ddof=1)
-        rhat = np.sqrt(((half - 1) / half * W + B / half) / W)
+        W = split.var(axis=1, ddof=1).mean(axis=0) #Within-chain variance
+        B = half * split.mean(axis=1).var(axis=0, ddof=1) #Between-chain variance
+        rhat = np.sqrt(((half - 1) / half * W + B / half) / W) #Vehtari et al. (2021) eq. 3.4
         rhat_classic = rhat
 
         def z_rank(x):          # [D, n] -> normal scores of the ranks pooled over chains
             r = ss.rankdata(x.ravel(), method="average").reshape(x.shape)
-            return ss.norm.ppf((r - 0.375) / (x.size + 0.25))
+            return ss.norm.ppf((r - 0.375) / (x.size + 0.25)) #Vehtari et al. (2021) eq. 4.1
 
         def split_rhat(x):      # [D, n], one parameter
             s = np.concatenate([x[:, :half], x[:, half:2 * half]], axis=0)
@@ -551,12 +551,12 @@ class SSModel:
             ac = np.fft.irfft(f * np.conj(f), axis=1)[:, :h] / (h - np.arange(h))
             w = (ac[:, 0] * h / (h - 1)).mean()
             var_plus = (h - 1) / h * w + s.mean(axis=1).var(ddof=1)
-            rho = 1 - (w - (ac * (h / (h - 1))).mean(axis=0)) / var_plus
+            rho = 1 - (w - (ac * (h / (h - 1))).mean(axis=0)) / var_plus # Vehtari et al. (2021) eq. 3.10
             tau, t = 1.0, 1
             while t + 1 < h and rho[t] + rho[t + 1] > 0:
                 tau += 2 * (rho[t] + rho[t + 1])
                 t += 2
-            return float(m * h / tau)
+            return float(m * h / tau) # Vehtari et al. (2021) eq. 3.12
 
         rhat = np.array([max(split_rhat(z_rank(draws[:, :, j])),
                              split_rhat(z_rank(np.abs(draws[:, :, j] - np.median(draws[:, :, j])))))

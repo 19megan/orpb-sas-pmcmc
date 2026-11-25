@@ -102,21 +102,41 @@ def main():
         B = h * s.mean(axis=1).var(axis=0, ddof=1)
         return np.sqrt(((h - 1) / h * W + B / h) / W)
 
+    from scipy.stats import norm, rankdata
+
+    def rank_rhat(x):
+        # rank-normalized split R-hat (Vehtari et al. 2021), the larger of bulk and folded, as in
+        # SSModel.pmmh_summary and compile_runs.py; x is [chains, draws] or [chains, draws, dates],
+        # ranks pooled over chains and draws separately for each date
+        flat = x.reshape(x.shape[0] * x.shape[1], -1)
+
+        def z(v):
+            return norm.ppf((rankdata(v, axis=0) - 0.375) / (v.shape[0] + 0.25)).reshape(x.shape)
+
+        return np.maximum(rhat(z(flat)), rhat(z(np.abs(flat - np.median(flat, axis=0)))))
+
     # one RMSE per draw, each period counted equally
     draw_rmse = np.mean([np.sqrt(((preds[:, :, s] - y_all[s]) ** 2).mean(axis=2)) for s in sels.values()], axis=0)
     scored = np.any(list(sels.values()), axis=0)
-    r_pt = rhat(preds[:, :, scored])
-    r_rmse = float(rhat(draw_rmse))
+    # r_pt = rhat(preds[:, :, scored])
+    # r_rmse = float(rhat(draw_rmse))
+    r_pt = rank_rhat(preds[:, :, scored])
+    r_rmse = float(rank_rhat(draw_rmse))
+    r_pt_classic = rhat(preds[:, :, scored])
+    r_rmse_classic = float(rhat(draw_rmse))
     print(f"\n{D} chains, {len(steps)} draws per chain, {scored.sum()} scored observations")
-    print(f"R-hat of the prediction at each scored date: median {np.median(r_pt):.2f}, 95th pct {np.percentile(r_pt, 95):.2f}, max {r_pt.max():.2f}")
-    print(f"R-hat of per-draw RMSE: {r_rmse:.2f}")
+    print(f"Rank R-hat of the prediction at each scored date: median {np.median(r_pt):.2f}, 95th pct {np.percentile(r_pt, 95):.2f}, max {r_pt.max():.2f}")
+    print(f"Rank R-hat of per-draw RMSE: {r_rmse:.2f}")
+    print(f"(classic: median {np.median(r_pt_classic):.2f}, 95th pct {np.percentile(r_pt_classic, 95):.2f}, max {r_pt_classic.max():.2f}, RMSE {r_rmse_classic:.2f})")
 
     if args.out:
         row = pd.DataFrame([{"tag": tag, "pred chains": D, "pred draws per chain": len(steps),
                              "pred dropped chains": " ".join(map(str, args.drop)),
                              "pred rhat median": float(np.median(r_pt)),
                              "pred rhat p95": float(np.percentile(r_pt, 95)),
-                             "pred rhat max": float(r_pt.max()), "rmse rhat": r_rmse}])
+                             "pred rhat max": float(r_pt.max()), "rmse rhat": r_rmse,
+                             "pred rhat classic median": float(np.median(r_pt_classic)),
+                             "rmse rhat classic": r_rmse_classic}])
         if os.path.exists(args.out):
             old = pd.read_csv(args.out)
             row = pd.concat([old[old["tag"] != tag], row], ignore_index=True)
